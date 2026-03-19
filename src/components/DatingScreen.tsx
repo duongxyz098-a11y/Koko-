@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Heart, MessageCircle, User, Dices, Sparkles, ChevronLeft, ChevronRight, Briefcase, Upload, Image as ImageIcon, Send, Settings, RefreshCw, Trash2, Plus, Users, Loader2 } from 'lucide-react';
+import { Heart, MessageCircle, User, Dices, Sparkles, ChevronLeft, ChevronRight, Briefcase, Upload, Image as ImageIcon, Send, Settings, RefreshCw, Trash2, Plus, Users, Loader2, Download } from 'lucide-react';
 import { sendCoreMessage, KokoPrompt, ChatMessage } from '../services/coreAi';
 
 const personalities = [
@@ -195,7 +195,30 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostImage, setNewPostImage] = useState<string | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const isSwitching = useRef(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
 
   const [npcUploadedImages, setNpcUploadedImages] = useState<string[]>(() => {
     try {
@@ -1304,6 +1327,15 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         >
           <ImageIcon size={20} />
         </button>
+        {deferredPrompt && (
+          <button 
+            onClick={handleInstallClick}
+            className="p-2 bg-[#F3B4C2] text-white rounded-full shadow-md active:scale-95 transition-transform flex items-center gap-2 px-4"
+          >
+            <Download size={18} />
+            <span className="text-xs font-bold">Tải App</span>
+          </button>
+        )}
       </div>
 
       <div className="p-5 flex flex-col items-center border-b border-black/5 bg-white/40 backdrop-blur-md">
