@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera } from 'lucide-react';
+import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera, Heart } from 'lucide-react';
 
 const pages = [0, 1, 2];
 
-export default function HomeScreen({ openSettings, openKoko }: { openSettings: () => void, openKoko: () => void }) {
+export default function HomeScreen({ openSettings, openKoko, openDating }: { openSettings: () => void, openKoko: () => void, openDating: () => void }) {
   const [currentPage, setCurrentPage] = useState(0);
   const [appBackground, setAppBackground] = useState(() => localStorage.getItem('home_bg') || '');
   const bgInputRef = useRef<HTMLInputElement>(null);
@@ -87,6 +87,13 @@ export default function HomeScreen({ openSettings, openKoko }: { openSettings: (
                     <MessageCircle size={32} />
                   </div>
                   <span className="text-[11px] font-medium text-gray-700">Koko</span>
+                </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openDating}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <Heart size={32} fill="#F3B4C2" />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">Dating</span>
                 </div>
 
                 {/* Widget 2x2 */}

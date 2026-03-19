@@ -15,9 +15,10 @@ import PasscodeScreen from './components/PasscodeScreen';
 import HomeScreen from './components/HomeScreen';
 import ApiSettings, { ApiSettingsData } from './components/ApiSettings';
 import KokoScreen from './components/KokoScreen';
+import DatingScreen from './components/DatingScreen';
 
 export default function App() {
-  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko'>('lock');
+  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating'>('lock');
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<ApiSettingsData>(() => {
     const saved = localStorage.getItem('kotokoo_settings');
@@ -46,10 +47,14 @@ export default function App() {
               key="home" 
               openSettings={() => setShowSettings(true)} 
               openKoko={() => setScreen('koko')}
+              openDating={() => setScreen('dating')}
             />
           )}
           {screen === 'koko' && (
             <KokoScreen key="koko" onBack={() => setScreen('home')} />
+          )}
+          {screen === 'dating' && (
+            <DatingScreen key="dating" onBack={() => setScreen('home')} />
           )}
         </AnimatePresence>
 

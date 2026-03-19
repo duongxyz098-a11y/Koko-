@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, Send, Loader2 } from 'lucide-react';
 import { sendCoreMessage, ChatMessage } from '../services/coreAi';
 
@@ -54,6 +54,21 @@ export default function ChatScreen({ prompt, onBack }: { prompt: Prompt, onBack:
       exit={{ opacity: 0, x: 50 }}
       className="absolute inset-0 w-full h-full bg-[#FAF9F6] flex flex-col z-[200]"
     >
+      {/* Global Processing Bar */}
+      <AnimatePresence>
+        {isLoading && (
+          <motion.div 
+            initial={{ y: -100 }}
+            animate={{ y: 0 }}
+            exit={{ y: -100 }}
+            className="fixed top-0 left-0 right-0 z-[1000] bg-[#F3B4C2] text-white py-3 px-4 flex items-center justify-center gap-3 shadow-lg"
+          >
+            <Loader2 className="animate-spin" size={20} />
+            <span className="text-sm font-bold tracking-wide uppercase">Hệ thống đang làm việc... Vui lòng chờ kết quả</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <div className="h-[60px] bg-white/90 backdrop-blur-md flex items-center px-4 shadow-sm z-10 pt-safe shrink-0">
         <button onClick={onBack} className="p-2 -ml-2 hover:bg-black/5 rounded-full transition-colors">
