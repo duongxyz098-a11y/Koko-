@@ -1,0 +1,135 @@
+import { useState, useEffect, useRef } from 'react';
+import { motion } from 'motion/react';
+import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera } from 'lucide-react';
+
+const pages = [0, 1, 2];
+
+export default function HomeScreen({ openSettings, openKoko }: { openSettings: () => void, openKoko: () => void }) {
+  const [currentPage, setCurrentPage] = useState(0);
+  const [appBackground, setAppBackground] = useState(() => localStorage.getItem('home_bg') || '');
+  const bgInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    localStorage.setItem('home_bg', appBackground);
+  }, [appBackground]);
+
+  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAppBackground(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  return (
+    <div 
+      className="absolute inset-0 w-full h-full bg-[#FAF9F6] overflow-hidden bg-cover bg-center transition-all duration-300"
+      style={{ backgroundImage: appBackground ? `url('${appBackground}')` : 'none' }}
+    >
+      {/* Pattern */}
+      {!appBackground && (
+        <div 
+          className="absolute inset-0 w-full h-full opacity-50"
+          style={{ 
+            backgroundImage: 'radial-gradient(#00000022 1px, transparent 1px)',
+            backgroundSize: '20px 20px'
+          }}
+        />
+      )}
+
+      {/* Top Bar for Background Upload */}
+      <div className="absolute top-0 left-0 right-0 p-4 flex justify-end z-20 pt-safe">
+        <input 
+          type="file" 
+          accept="image/*" 
+          className="hidden" 
+          ref={bgInputRef} 
+          onChange={handleBgUpload} 
+        />
+        <button 
+          onClick={() => bgInputRef.current?.click()}
+          className="text-[12px] px-3 py-1.5 rounded-full bg-white/50 backdrop-blur-md border border-white/40 shadow-sm flex items-center gap-1.5 cursor-pointer hover:bg-white/70 transition-colors text-gray-700 font-medium"
+        >
+          <ImageIcon size={14} />
+          Đổi nền
+        </button>
+      </div>
+
+      {/* Pages */}
+      <motion.div 
+        className="flex w-full h-full"
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        onDragEnd={(e, info) => {
+          if (info.offset.x < -50 && currentPage < pages.length - 1) setCurrentPage(p => p + 1);
+          if (info.offset.x > 50 && currentPage > 0) setCurrentPage(p => p - 1);
+        }}
+        animate={{ x: `-${currentPage * 100}%` }}
+        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      >
+        {pages.map(page => (
+          <div key={page} className="min-w-full h-full pt-16 px-6 relative">
+            {page === 0 && (
+              <div className="grid grid-cols-4 gap-x-4 gap-y-6 max-w-md mx-auto">
+                {/* App Icon */}
+                <div className="flex flex-col items-center gap-1" onClick={openSettings}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <Settings size={32} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">Cài đặt API</span>
+                </div>
+                
+                <div className="flex flex-col items-center gap-1" onClick={openKoko}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <MessageCircle size={32} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">Koko</span>
+                </div>
+
+                {/* Widget 2x2 */}
+                <div className="col-span-2 row-span-2 bg-white rounded-[22px] shadow-[0_0_20px_#F9C6D4] overflow-hidden relative">
+                  <img src="https://i.postimg.cc/9FnXQNpn/e1d0cd594c41440c5e1dadc28f25c69a.jpg" className="w-full h-full object-cover opacity-80" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#F9C6D4]/80 to-transparent flex items-end p-4">
+                    <span className="text-white font-semibold">Kotokoo</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {page === 1 && (
+              <div className="flex items-center justify-center h-full text-gray-400">Trang 2</div>
+            )}
+            {page === 2 && (
+              <div className="flex items-center justify-center h-full text-gray-400">Trang 3</div>
+            )}
+          </div>
+        ))}
+      </motion.div>
+
+      {/* Page Indicators */}
+      <div className="absolute bottom-[120px] left-0 w-full flex justify-center gap-2">
+        {pages.map(p => (
+          <div key={p} className={`w-2 h-2 rounded-full ${currentPage === p ? 'bg-[#F3B4C2]' : 'bg-gray-300'}`} />
+        ))}
+      </div>
+
+      {/* Dock */}
+      <div className="absolute bottom-6 left-5 right-5 md:left-1/2 md:-translate-x-1/2 md:w-full md:max-w-md h-[85px] bg-white/40 backdrop-blur-[20px] rounded-[30px] flex justify-around items-center px-4 shadow-lg border border-white/50">
+        <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-sm flex items-center justify-center text-[#F3B4C2]">
+          <Phone size={28} />
+        </div>
+        <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-sm flex items-center justify-center text-[#F3B4C2]">
+          <MessageCircle size={28} />
+        </div>
+        <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-sm flex items-center justify-center text-[#F3B4C2]">
+          <Camera size={28} />
+        </div>
+        <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-sm flex items-center justify-center text-[#F3B4C2]">
+          <ImageIcon size={28} />
+        </div>
+      </div>
+    </div>
+  );
+}
