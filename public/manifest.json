@@ -2,7 +2,7 @@
   "name": "Sách Thế Giới",
   "short_name": "Sách Thế Giới",
   "description": "Ứng dụng hẹn hò và kết nối NPC",
-  "start_url": "/",
+  "start_url": ".",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#F3B4C2",
