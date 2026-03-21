@@ -1,0 +1,772 @@
+import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ChevronLeft, Heart, Star, Coffee, MessageCircle, User, Settings, Image as ImageIcon, Loader2, Send } from 'lucide-react';
+import { generateNPCs, generateLoveQuiz, generateCafeScenarios, generateNPCResponse, NPCProfile, QuizQuestion, CafeScenario, UserProfile } from '../services/geminiService';
+
+export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
+  const [activeTab, setActiveTab] = useState<'apply' | 'show'>('apply');
+  const [appBackground, setAppBackground] = useState(() => localStorage.getItem('loveshow_bg') || '');
+  const bgInputRef = useRef<HTMLInputElement>(null);
+  
+  // Game State
+  const [npcs, setNpcs] = useState<NPCProfile[]>([]);
+  const [loadingNpcs, setLoadingNpcs] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [activeMiniGame, setActiveMiniGame] = useState<'none' | 'quiz' | 'cafe'>('none');
+  const [selectedNpc, setSelectedNpc] = useState<NPCProfile | null>(null);
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'npc', content: string}[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  
+  // Application Data
+  const [formData, setFormData] = useState<UserProfile>(() => {
+    const saved = localStorage.getItem('loveshow_profile');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return {
+      name: '',
+      intro: '',
+      target: '',
+      reason: '',
+      mc: 'MC Sâu Bọ',
+      gender: 'female',
+      targetGender: 'male',
+      minChars: 2000,
+      maxChars: 4000,
+      avatarBg: '#FFFFFF'
+    };
+  });
+
+  const handleSaveProfile = () => {
+    localStorage.setItem('loveshow_profile', JSON.stringify(formData));
+    alert('Đã lưu hồ sơ thành công! Các NPC đã đọc được hồ sơ của bạn. Hãy chuyển sang Sàn Diễn để bắt đầu.');
+  };
+
+  const handleSelectNpc = async (npc: NPCProfile) => {
+    setSelectedNpc(npc);
+    setChatHistory([]);
+    setIsTyping(true);
+    
+    try {
+      // Gọi API ngay lập tức để lấy lời chào dài
+      const response = await generateNPCResponse(npc, "Chào bạn! Hãy giới thiệu bản thân một cách chi tiết và ấn tượng nhé.", [], formData);
+      setChatHistory([{ role: 'npc', content: response }]);
+    } catch (e) {
+      console.error(e);
+      setChatHistory([{ role: 'npc', content: "Xin lỗi, hiện tại tôi đang hơi bối rối một chút..." }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleLoadMoreNpcs = async () => {
+    setLoadingNpcs(true);
+    setError(null);
+    try {
+      const generatedNpcs = await generateNPCs(20, formData);
+      setNpcs(prev => [...prev, ...generatedNpcs]);
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message || "Có lỗi xảy ra khi gọi API.");
+    } finally {
+      setLoadingNpcs(false);
+    }
+  };
+
+  const handleStartShow = async () => {
+    setActiveTab('show');
+    if (npcs.length === 0) {
+      await handleLoadMoreNpcs();
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || !selectedNpc) return;
+    
+    const userMsg = chatInput;
+    setChatInput('');
+    setChatHistory(prev => [...prev, { role: 'user', content: userMsg }]);
+    setIsTyping(true);
+    
+    try {
+      const history = chatHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
+      const response = await generateNPCResponse(selectedNpc, userMsg, history, formData);
+      setChatHistory(prev => [...prev, { role: 'npc', content: response }]);
+    } catch (e) {
+      console.error(e);
+      setChatHistory(prev => [...prev, { role: 'npc', content: "Xin lỗi, hiện tại tôi đang hơi bối rối một chút..." }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleBgChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        setAppBackground(result);
+        localStorage.setItem('loveshow_bg', result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className="absolute inset-0 bg-[#FFF5F7] z-50 flex flex-col overflow-hidden"
+      style={{
+        backgroundImage: appBackground ? `url(${appBackground})` : 'none',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      }}
+    >
+      {/* Header */}
+      <div className="h-16 flex items-center justify-between px-4 bg-white/80 backdrop-blur-md border-b border-[#F9C6D4] shrink-0 sticky top-0 z-10">
+        <button onClick={onBack} className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors">
+          <ChevronLeft size={24} />
+        </button>
+        <h1 className="text-xl font-bold text-[#F3B4C2] font-['Comic_Sans_MS',_cursive]">Show Hẹn Hò</h1>
+        <div className="flex gap-2">
+          <button onClick={() => bgInputRef.current?.click()} className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors">
+            <ImageIcon size={20} />
+          </button>
+          <input type="file" ref={bgInputRef} onChange={handleBgChange} accept="image/*" className="hidden" />
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex p-4 gap-2 shrink-0">
+        <button
+          onClick={() => setActiveTab('apply')}
+          className={`flex-1 py-3 rounded-2xl font-bold transition-all ${activeTab === 'apply' ? 'bg-[#F3B4C2] text-white shadow-md' : 'bg-white/60 text-[#F3B4C2] hover:bg-white/80'}`}
+        >
+          Ứng Tuyển
+        </button>
+        <button
+          onClick={() => setActiveTab('show')}
+          className={`flex-1 py-3 rounded-2xl font-bold transition-all ${activeTab === 'show' ? 'bg-[#F3B4C2] text-white shadow-md' : 'bg-white/60 text-[#F3B4C2] hover:bg-white/80'}`}
+        >
+          Sàn Diễn
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4 pb-24">
+        <AnimatePresence mode="wait">
+          {activeMiniGame === 'quiz' ? (
+            <LoveQuiz key="quiz" onBack={() => setActiveMiniGame('none')} />
+          ) : activeMiniGame === 'cafe' ? (
+            <LoveCafe key="cafe" onBack={() => setActiveMiniGame('none')} />
+          ) : selectedNpc ? (
+            <ChatView 
+              key="chat" 
+              npc={selectedNpc} 
+              onBack={() => setSelectedNpc(null)} 
+              chatHistory={chatHistory}
+              chatInput={chatInput}
+              setChatInput={setChatInput}
+              handleSendMessage={handleSendMessage}
+              isTyping={isTyping}
+            />
+          ) : activeTab === 'apply' ? (
+            <ApplyTab 
+              key="apply" 
+              formData={formData} 
+              setFormData={setFormData} 
+              onSaveProfile={handleSaveProfile}
+              onStartQuiz={() => setActiveMiniGame('quiz')}
+              onStartCafe={() => setActiveMiniGame('cafe')}
+            />
+          ) : (
+            <MainShowTab 
+              key="show" 
+              npcs={npcs} 
+              loading={loadingNpcs} 
+              onSelectNpc={handleSelectNpc}
+              onLoadMore={handleLoadMoreNpcs}
+              avatarBg={formData.avatarBg}
+              error={error}
+            />
+          )}
+        </AnimatePresence>
+      </div>
+
+      <AnimatePresence>
+        {selectedNpc && (
+          <ChatView 
+            key="chat-fullscreen" 
+            npc={selectedNpc} 
+            onBack={() => setSelectedNpc(null)} 
+            chatHistory={chatHistory}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            handleSendMessage={handleSendMessage}
+            isTyping={isTyping}
+            avatarBg={formData.avatarBg}
+          />
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+function ApplyTab({ formData, setFormData, onSaveProfile, onStartQuiz, onStartCafe }: any) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="space-y-6"
+    >
+      <div className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4]">
+        <h2 className="text-2xl font-bold text-[#F3B4C2] mb-4 font-['Comic_Sans_MS',_cursive]">Hồ Sơ Ứng Tuyển</h2>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-1">Tên của bạn</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={e => setFormData({...formData, name: e.target.value})}
+              className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              placeholder="Nhập tên của bạn..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-1">Giới thiệu bản thân</label>
+            <textarea
+              value={formData.intro}
+              onChange={e => setFormData({...formData, intro: e.target.value})}
+              className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700 h-24 resize-none"
+              placeholder="Hãy kể một chút về bạn..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-1">Đối tượng muốn tìm hiểu</label>
+            <input
+              type="text"
+              value={formData.target}
+              onChange={e => setFormData({...formData, target: e.target.value})}
+              className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              placeholder="Gu của bạn là gì..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-1">Lý do tham gia chương trình</label>
+            <textarea
+              value={formData.reason}
+              onChange={e => setFormData({...formData, reason: e.target.value})}
+              className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700 h-24 resize-none"
+              placeholder="Tại sao bạn muốn tham gia..."
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Giới tính của bạn</label>
+              <select
+                value={formData.gender}
+                onChange={e => setFormData({...formData, gender: e.target.value})}
+                className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              >
+                <option value="male">Nam</option>
+                <option value="female">Nữ</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Giới tính đối tượng</label>
+              <select
+                value={formData.targetGender}
+                onChange={e => setFormData({...formData, targetGender: e.target.value})}
+                className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              >
+                <option value="male">Nam</option>
+                <option value="female">Nữ</option>
+                <option value="any">Bất kỳ</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-1">Chọn MC Dẫn Dắt</label>
+            <select
+              value={formData.mc}
+              onChange={e => setFormData({...formData, mc: e.target.value})}
+              className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+            >
+              <option value="MC Sâu Bọ">MC Sâu Bọ (Vui vẻ, hoạt ngôn)</option>
+              <option value="MC Radio">MC Radio (Nói không ngừng nghỉ)</option>
+              <option value="MC Robot">MC Robot (Nghiêm túc, logic)</option>
+              <option value="MC Bong Bóng">MC Bong Bóng (Nhẹ nhàng, bay bổng)</option>
+              <option value="MC Lửa Trại">MC Lửa Trại (Nhiệt huyết, cháy hết mình)</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Độ dài tối thiểu (ký tự)</label>
+              <input
+                type="number"
+                value={formData.minChars}
+                onChange={e => setFormData({...formData, minChars: parseInt(e.target.value)})}
+                className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Độ dài tối đa (ký tự)</label>
+              <input
+                type="number"
+                value={formData.maxChars}
+                onChange={e => setFormData({...formData, maxChars: parseInt(e.target.value)})}
+                className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-1">Màu nền Avatar NPC (Hex)</label>
+            <div className="flex gap-2">
+              <input
+                type="color"
+                value={formData.avatarBg}
+                onChange={e => setFormData({...formData, avatarBg: e.target.value})}
+                className="h-12 w-20 rounded-xl border border-[#F9C6D4] cursor-pointer"
+              />
+              <input
+                type="text"
+                value={formData.avatarBg}
+                onChange={e => setFormData({...formData, avatarBg: e.target.value})}
+                className="flex-1 p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+                placeholder="#FFFFFF"
+              />
+            </div>
+          </div>
+
+          <button onClick={onSaveProfile} className="w-full py-4 bg-[#F3B4C2] text-white rounded-xl font-bold shadow-md hover:bg-[#e8a5b4] transition-colors mt-4">
+            Lưu Hồ Sơ
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div onClick={onStartQuiz} className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] flex flex-col items-center text-center gap-3 cursor-pointer hover:scale-105 transition-transform">
+          <div className="w-16 h-16 bg-[#FFF5F7] rounded-full flex items-center justify-center text-[#F3B4C2]">
+            <Star size={32} />
+          </div>
+          <h3 className="font-bold text-gray-800">Thử Thách 10 Câu Hỏi</h3>
+          <p className="text-xs text-gray-500">Trả lời sai tối đa 1 lần để đi tiếp.</p>
+        </div>
+        <div onClick={onStartCafe} className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] flex flex-col items-center text-center gap-3 cursor-pointer hover:scale-105 transition-transform">
+          <div className="w-16 h-16 bg-[#FFF5F7] rounded-full flex items-center justify-center text-[#F3B4C2]">
+            <Coffee size={32} />
+          </div>
+          <h3 className="font-bold text-gray-800">Cafe Tình Yêu ☕</h3>
+          <p className="text-xs text-gray-500">Lắng nghe và giải quyết tâm sự của khách hàng.</p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function MainShowTab({ npcs, loading, onSelectNpc, onLoadMore, avatarBg, error }: { npcs: NPCProfile[], loading: boolean, onSelectNpc: (npc: NPCProfile) => void, onLoadMore: () => void, avatarBg: string, error: string | null }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="space-y-6"
+    >
+      <div className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] text-center">
+        <h2 className="text-2xl font-bold text-[#F3B4C2] mb-2 font-['Comic_Sans_MS',_cursive]">Sàn Diễn Tình Yêu</h2>
+        <p className="text-gray-600 text-sm mb-6">Bấm dấu + để API gọi thêm 50 NPC phù hợp với gu của bạn!</p>
+        
+        <button onClick={onLoadMore} disabled={loading} className="px-6 py-3 bg-[#F3B4C2] text-white rounded-full font-bold shadow-md hover:bg-[#e8a5b4] transition-transform hover:scale-105 text-lg disabled:opacity-50 flex items-center justify-center gap-2 mx-auto">
+          {loading ? <><Loader2 className="animate-spin" size={24} /> Đang gọi API...</> : '+ Gọi 20 Đối Tượng'}
+        </button>
+
+        {error && (
+          <p className="text-red-500 font-bold mt-4">{error}</p>
+        )}
+
+        <div className="mt-8 grid grid-cols-2 gap-4">
+            {npcs.map(npc => (
+              <div key={npc.id} className="bg-[#FFF5F7] rounded-2xl p-4 border border-[#F9C6D4] flex flex-col items-center gap-2 text-center">
+                <div className="w-20 h-20 rounded-full shadow-sm overflow-hidden border-2 border-[#F3B4C2]" style={{ backgroundColor: avatarBg }}>
+                  <img src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${npc.avatarSeed}`} alt={npc.name} className="w-full h-full object-cover" />
+                </div>
+                <div className="font-bold text-gray-700">{npc.name}, {npc.age}</div>
+                <div className="text-xs text-gray-500 bg-white px-2 py-1 rounded-full border border-[#F9C6D4]">{npc.mbti}</div>
+                <p className="text-xs text-gray-600 line-clamp-2 mt-1">{npc.intro}</p>
+                <button onClick={() => onSelectNpc(npc)} className="mt-2 w-full py-2 bg-white text-[#F3B4C2] rounded-xl font-bold border border-[#F3B4C2] hover:bg-[#F3B4C2] hover:text-white transition-colors text-sm flex items-center justify-center gap-1">
+                  <MessageCircle size={16} /> Trò chuyện
+                </button>
+              </div>
+            ))}
+          </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function ChatView({ npc, onBack, chatHistory, chatInput, setChatInput, handleSendMessage, isTyping, avatarBg }: any) {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory, isTyping]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: '100%' }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: '100%' }}
+      transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+      className="fixed inset-0 bg-white z-[60] flex flex-col"
+    >
+      <div className="p-4 border-b border-[#F9C6D4] flex items-center gap-3 bg-[#FFF5F7] shrink-0">
+        <button onClick={onBack} className="p-2 text-[#F3B4C2] hover:bg-white rounded-full transition-colors">
+          <ChevronLeft size={24} />
+        </button>
+        <div className="w-12 h-12 rounded-full shadow-sm overflow-hidden border border-[#F3B4C2]" style={{ backgroundColor: avatarBg }}>
+          <img src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${npc.avatarSeed}`} alt={npc.name} className="w-full h-full object-cover" />
+        </div>
+        <div>
+          <h3 className="font-bold text-gray-800 text-lg">{npc.name}</h3>
+          <p className="text-sm text-gray-500">{npc.age} tuổi • {npc.mbti}</p>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-[#FFF5F7]/30">
+        {chatHistory.length === 0 && isTyping && (
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-4">
+            <Loader2 className="animate-spin" size={48} />
+            <p className="font-bold">Đang soạn lời chào cực dài...</p>
+          </div>
+        )}
+        
+        {chatHistory.map((msg: any, i: number) => (
+          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[90%] p-4 rounded-3xl ${msg.role === 'user' ? 'bg-[#F3B4C2] text-white rounded-tr-none shadow-md' : 'bg-white text-gray-800 border border-[#F9C6D4] rounded-tl-none shadow-sm'}`}>
+              <p className="text-base leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+            </div>
+          </div>
+        ))}
+        
+        {isTyping && chatHistory.length > 0 && (
+          <div className="flex justify-start">
+            <div className="bg-white border border-[#F9C6D4] p-4 rounded-3xl rounded-tl-none flex gap-1 shadow-sm">
+              <div className="w-2 h-2 bg-[#F3B4C2] rounded-full animate-bounce" />
+              <div className="w-2 h-2 bg-[#F3B4C2] rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+              <div className="w-2 h-2 bg-[#F3B4C2] rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="p-4 bg-white border-t border-[#F9C6D4] flex gap-3 shrink-0">
+        <input
+          type="text"
+          value={chatInput}
+          onChange={e => setChatInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+          placeholder="Nhập tin nhắn..."
+          className="flex-1 p-4 rounded-2xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-base"
+        />
+        <button 
+          onClick={handleSendMessage}
+          disabled={!chatInput.trim() || isTyping}
+          className="p-4 bg-[#F3B4C2] text-white rounded-2xl disabled:opacity-50 hover:bg-[#e8a5b4] transition-colors shadow-md"
+        >
+          <Send size={24} />
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+function LoveQuiz({ onBack }: { onBack: () => void }) {
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentQ, setCurrentQ] = useState(0);
+  const [score, setScore] = useState(0);
+  const [mistakes, setMistakes] = useState(0);
+  const [gameOver, setGameOver] = useState(false);
+  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+
+  useEffect(() => {
+    generateLoveQuiz().then(q => {
+      setQuestions(q);
+      setLoading(false);
+    });
+  }, []);
+
+  const handleAnswer = (index: number) => {
+    if (selectedAnswer !== null) return;
+    setSelectedAnswer(index);
+    
+    const isCorrect = index === questions[currentQ].correctAnswerIndex;
+    if (isCorrect) {
+      setScore(s => s + 1);
+    } else {
+      setMistakes(m => m + 1);
+    }
+
+    setTimeout(() => {
+      if (mistakes + (isCorrect ? 0 : 1) >= 2) {
+        setGameOver(true);
+      } else if (currentQ < questions.length - 1) {
+        setCurrentQ(q => q + 1);
+        setSelectedAnswer(null);
+      } else {
+        setGameOver(true);
+      }
+    }, 1500);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="bg-white/90 backdrop-blur-md rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] min-h-[400px] flex flex-col"
+    >
+      <div className="flex items-center justify-between mb-6">
+        <button onClick={onBack} className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors">
+          <ChevronLeft size={24} />
+        </button>
+        <h2 className="text-xl font-bold text-[#F3B4C2] font-['Comic_Sans_MS',_cursive]">Thử Thách 10 Câu Hỏi</h2>
+        <div className="flex gap-1">
+          <Heart size={20} className={mistakes < 2 ? 'text-red-500 fill-red-500' : 'text-gray-300'} />
+          <Heart size={20} className={mistakes < 1 ? 'text-red-500 fill-red-500' : 'text-gray-300'} />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <Loader2 className="animate-spin text-[#F3B4C2]" size={48} />
+          <p className="text-[#F3B4C2] font-bold">Đang chuẩn bị câu hỏi...</p>
+        </div>
+      ) : gameOver ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
+          <Star size={64} className="text-yellow-400 fill-yellow-400" />
+          <h3 className="text-2xl font-bold text-gray-800">Hoàn thành thử thách!</h3>
+          <p className="text-lg text-gray-600">Bạn trả lời đúng {score}/{questions.length} câu</p>
+          {mistakes >= 2 && <p className="text-red-500 font-bold">Bạn đã sai quá số lần quy định!</p>}
+          <button onClick={onBack} className="mt-4 px-8 py-3 bg-[#F3B4C2] text-white rounded-xl font-bold shadow-md hover:bg-[#e8a5b4] transition-colors">
+            Quay lại
+          </button>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col">
+          <div className="text-sm text-gray-500 font-bold mb-2">Câu hỏi {currentQ + 1}/{questions.length}</div>
+          <h3 className="text-lg font-bold text-gray-800 mb-6">{questions[currentQ]?.question}</h3>
+          
+          <div className="space-y-3 mt-auto">
+            {questions[currentQ]?.options.map((opt, i) => {
+              let btnClass = "w-full p-4 rounded-xl border-2 text-left font-medium transition-all ";
+              if (selectedAnswer === null) {
+                btnClass += "border-[#F9C6D4] bg-[#FFF5F7] text-gray-700 hover:bg-[#F9C6D4] hover:text-white";
+              } else if (i === questions[currentQ].correctAnswerIndex) {
+                btnClass += "border-green-500 bg-green-50 text-green-700";
+              } else if (i === selectedAnswer) {
+                btnClass += "border-red-500 bg-red-50 text-red-700";
+              } else {
+                btnClass += "border-gray-200 bg-gray-50 text-gray-400 opacity-50";
+              }
+
+              return (
+                <button
+                  key={i}
+                  onClick={() => handleAnswer(i)}
+                  disabled={selectedAnswer !== null}
+                  className={btnClass}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function LoveCafe({ onBack }: { onBack: () => void }) {
+  const [scenarios, setScenarios] = useState<CafeScenario[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMsg, setLoadingMsg] = useState("Đang làm việc chờ chút nhennn~");
+  const [error, setError] = useState<string | null>(null);
+  const [currentS, setCurrentS] = useState(0);
+  const [score, setScore] = useState(0);
+  const [gameOver, setGameOver] = useState(false);
+  const [selectedAdvice, setSelectedAdvice] = useState<number | null>(null);
+  const [customAvatars, setCustomAvatars] = useState<Record<string, string>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (loading) {
+      interval = setInterval(() => {
+        setLoadingMsg(prev => prev === "Đang làm việc chờ chút nhennn~" ? "Đang gõ phím nè cậu ơi" : "Đang làm việc chờ chút nhennn~");
+      }, 2000);
+    }
+    return () => clearInterval(interval);
+  }, [loading]);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    generateCafeScenarios(5).then(s => {
+      setScenarios(s);
+      setLoading(false);
+    }).catch(e => {
+      console.error(e);
+      setError(e.message || "Có lỗi xảy ra khi gọi API.");
+      setLoading(false);
+    });
+  }, []);
+
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && scenarios[currentS]) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setCustomAvatars(prev => ({
+          ...prev,
+          [scenarios[currentS].npcName]: reader.result as string
+        }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleAdvice = (index: number) => {
+    if (selectedAdvice !== null) return;
+    setSelectedAdvice(index);
+    
+    if (index === scenarios[currentS].bestAdviceIndex) {
+      setScore(s => s + 1);
+    }
+
+    setTimeout(() => {
+      if (currentS < scenarios.length - 1) {
+        setCurrentS(s => s + 1);
+        setSelectedAdvice(null);
+      } else {
+        setGameOver(true);
+      }
+    }, 2000);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="bg-white/90 backdrop-blur-md rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] min-h-[400px] flex flex-col"
+    >
+      <div className="flex items-center justify-between mb-6">
+        <button onClick={onBack} className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors">
+          <ChevronLeft size={24} />
+        </button>
+        <h2 className="text-xl font-bold text-[#F3B4C2] font-['Comic_Sans_MS',_cursive]">Cafe Tình Yêu ☕</h2>
+        <div className="font-bold text-[#F3B4C2]">Điểm: {score}</div>
+      </div>
+
+      {loading ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <Loader2 className="animate-spin text-[#F3B4C2]" size={48} />
+          <p className="text-[#F3B4C2] font-bold">{loadingMsg}</p>
+        </div>
+      ) : error ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-4 p-6">
+          <p className="text-red-500 font-bold">{error}</p>
+          <button onClick={() => window.location.reload()} className="px-6 py-2 bg-[#F3B4C2] text-white rounded-full font-bold">
+            Thử lại
+          </button>
+        </div>
+      ) : gameOver ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
+          <Coffee size={64} className="text-[#F3B4C2]" />
+          <h3 className="text-2xl font-bold text-gray-800">Kết thúc ca làm!</h3>
+          <p className="text-lg text-gray-600">Bạn đã tư vấn thành công {score}/{scenarios.length} khách hàng.</p>
+          <button onClick={onBack} className="mt-4 px-8 py-3 bg-[#F3B4C2] text-white rounded-xl font-bold shadow-md hover:bg-[#e8a5b4] transition-colors">
+            Quay lại
+          </button>
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col">
+          <div className="text-xs text-gray-500 font-bold mb-2">Khách hàng {currentS + 1}/{scenarios.length}</div>
+          <div className="bg-[#FFF5F7] p-4 rounded-2xl border border-[#F9C6D4] mb-6">
+            <div className="flex items-center gap-3 mb-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept="image/*"
+                className="hidden"
+              />
+              <div 
+                onClick={handleAvatarClick}
+                className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-400 border border-[#F3B4C2] overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
+              >
+                {customAvatars[scenarios[currentS]?.npcName] ? (
+                  <img src={customAvatars[scenarios[currentS]?.npcName]} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <User size={24} />
+                )}
+              </div>
+              <div>
+                <h4 className="font-bold text-gray-800">{scenarios[currentS]?.npcName}</h4>
+                <p className="text-xs text-gray-500 italic">Gọi món: {scenarios[currentS]?.coffeeOrder}</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-700 mt-2">"{scenarios[currentS]?.problem}"</p>
+          </div>
+          
+          <div className="space-y-3 mt-auto">
+            <p className="text-sm font-bold text-gray-500 mb-2">Lời khuyên của bạn:</p>
+            {scenarios[currentS]?.options.map((opt, i) => {
+              let btnClass = "w-full p-3 rounded-xl border-2 text-left text-sm font-medium transition-all ";
+              if (selectedAdvice === null) {
+                btnClass += "border-[#F9C6D4] bg-white text-gray-700 hover:bg-[#FFF5F7]";
+              } else if (i === scenarios[currentS].bestAdviceIndex) {
+                btnClass += "border-green-500 bg-green-50 text-green-700";
+              } else if (i === selectedAdvice) {
+                btnClass += "border-red-500 bg-red-50 text-red-700";
+              } else {
+                btnClass += "border-gray-200 bg-gray-50 text-gray-400 opacity-50";
+              }
+
+              return (
+                <button
+                  key={i}
+                  onClick={() => handleAdvice(i)}
+                  disabled={selectedAdvice !== null}
+                  className={btnClass}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}

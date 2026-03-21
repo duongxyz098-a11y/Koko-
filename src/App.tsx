@@ -16,9 +16,12 @@ import HomeScreen from './components/HomeScreen';
 import ApiSettings, { ApiSettingsData } from './components/ApiSettings';
 import KokoScreen from './components/KokoScreen';
 import DatingScreen from './components/DatingScreen';
+import KokoYouTube from './components/KokoYouTube';
+import LoveShowScreen from './components/LoveShowScreen';
+import NovelScreen from './components/NovelScreen';
 
 export default function App() {
-  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating'>('lock');
+  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating' | 'youtube' | 'loveshow' | 'novel'>('lock');
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<ApiSettingsData>(() => {
     const saved = localStorage.getItem('kotokoo_settings');
@@ -48,6 +51,9 @@ export default function App() {
               openSettings={() => setShowSettings(true)} 
               openKoko={() => setScreen('koko')}
               openDating={() => setScreen('dating')}
+              openYouTube={() => setScreen('youtube')}
+              openLoveShow={() => setScreen('loveshow')}
+              openNovel={() => setScreen('novel')}
             />
           )}
           {screen === 'koko' && (
@@ -55,6 +61,15 @@ export default function App() {
           )}
           {screen === 'dating' && (
             <DatingScreen key="dating" onBack={() => setScreen('home')} />
+          )}
+          {screen === 'youtube' && (
+            <KokoYouTube key="youtube" onClose={() => setScreen('home')} />
+          )}
+          {screen === 'loveshow' && (
+            <LoveShowScreen key="loveshow" onBack={() => setScreen('home')} />
+          )}
+          {screen === 'novel' && (
+            <NovelScreen key="novel" onBack={() => setScreen('home')} />
           )}
         </AnimatePresence>
 

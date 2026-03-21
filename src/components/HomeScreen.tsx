@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera, Heart } from 'lucide-react';
+import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera, Heart, Tv, BookOpen } from 'lucide-react';
 
 const pages = [0, 1, 2];
 
-export default function HomeScreen({ openSettings, openKoko, openDating }: { openSettings: () => void, openKoko: () => void, openDating: () => void }) {
+export default function HomeScreen({ openSettings, openKoko, openDating, openYouTube, openLoveShow, openNovel }: { openSettings: () => void, openKoko: () => void, openDating: () => void, openYouTube: () => void, openLoveShow: () => void, openNovel: () => void }) {
   const [currentPage, setCurrentPage] = useState(0);
   const [appBackground, setAppBackground] = useState(() => localStorage.getItem('home_bg') || '');
   const bgInputRef = useRef<HTMLInputElement>(null);
@@ -94,6 +94,27 @@ export default function HomeScreen({ openSettings, openKoko, openDating }: { ope
                     <Heart size={32} fill="#F3B4C2" />
                   </div>
                   <span className="text-[11px] font-medium text-gray-700">Dating</span>
+                </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openYouTube}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="lucide lucide-youtube"><path d="M2.25 8.025c0-2.071 1.679-3.75 3.75-3.75h12c2.071 0 3.75 1.679 3.75 3.75v7.95c0 2.071-1.679 3.75-3.75 3.75h-12c-2.071 0-3.75-1.679-3.75-3.75v-7.95z"/><path d="m9.75 15.75 6-3.75-6-3.75v7.5z" fill="white"/></svg>
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">YouTube</span>
+                </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openLoveShow}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <Tv size={32} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">Love Show</span>
+                </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openNovel}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <BookOpen size={32} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">Novel</span>
                 </div>
 
                 {/* Widget 2x2 */}

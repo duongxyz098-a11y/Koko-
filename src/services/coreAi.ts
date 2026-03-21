@@ -89,9 +89,12 @@ export const sendCoreMessage = async (
 
   // If user has provided a custom API key and URL (Proxy), use it
   if (userApiKey && userApiUrl) {
+    // Trim history to avoid exceeding context window
+    const trimmedHistory = history.slice(-10);
+    
     const messages = [
       { role: 'system', content: buildSystemPrompt(koko, chatSettings, userContext) },
-      ...history,
+      ...trimmedHistory,
       { role: 'user', content: message }
     ];
 
@@ -132,29 +135,56 @@ export const sendCoreMessage = async (
       temperature: 0.7,
     };
 
-    if (chatSettings?.mode !== 'novel') {
-      requestBody.max_tokens = 4000;
+    // Increase max_tokens to be safer for larger batches, but allow model to decide if not specified
+    if (chatSettings?.mode === 'novel') {
+      requestBody.max_tokens = 3000;
+    } else {
+      // For general tasks, we want enough room for JSON responses or multiple posts
+      requestBody.max_tokens = 3000; 
     }
 
-    const response = await fetch(finalUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${userApiKey.trim()}`
-      },
-      body: JSON.stringify(requestBody)
-    });
+    try {
+      const response = await fetch(finalUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${userApiKey.trim()}`
+        },
+        body: JSON.stringify(requestBody)
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error?.message || `Lỗi kết nối API Proxy: ${response.status}. Hãy kiểm tra lại API Key và URL Proxy trong phần Cài đặt.`);
-    }
+      if (!response.ok) {
+        let errorMsg = `Lỗi kết nối API Proxy: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.error?.message) {
+            errorMsg = `Lỗi API: ${errorData.error.message}`;
+          } else if (errorData.message) {
+            errorMsg = `Lỗi API: ${errorData.message}`;
+          }
+        } catch (e) {
+          // If not JSON, try text
+          const textError = await response.text().catch(() => '');
+          if (textError) errorMsg += ` - ${textError.substring(0, 100)}`;
+        }
+        
+        if (response.status === 401) errorMsg += " (Sai API Key/Token)";
+        if (response.status === 429) errorMsg += " (Hết hạn mức/Rate limit)";
+        
+        throw new Error(errorMsg);
+      }
 
-    const data = await response.json();
-    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-      throw new Error('Phản hồi từ API Proxy không đúng định dạng. Hãy kiểm tra lại Model Name.');
+      const data = await response.json();
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('Phản hồi từ API Proxy không đúng định dạng. Hãy kiểm tra lại Model Name hoặc URL Proxy.');
+      }
+      return data.choices[0].message.content;
+    } catch (error: any) {
+      if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+        throw new Error('Không thể kết nối tới Proxy URL. Hãy đảm bảo URL chính xác và có thể truy cập từ trình duyệt.');
+      }
+      throw error;
     }
-    return data.choices[0].message.content;
   }
 
   // If no proxy, throw error as per user's "100% proxy" requirement

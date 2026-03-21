@@ -1,8 +1,10 @@
-const CACHE_NAME = 'dating-app-v1';
+const CACHE_NAME = 'dating-app-v2';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/manifest.json'
+  '/manifest.json',
+  '/koko-youtube.html',
+  '/koko-manifest.json'
 ];
 
 self.addEventListener('install', (event) => {

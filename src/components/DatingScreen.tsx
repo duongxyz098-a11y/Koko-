@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Heart, MessageCircle, User, Dices, Sparkles, ChevronLeft, ChevronRight, Briefcase, Upload, Image as ImageIcon, Send, Settings, RefreshCw, Trash2, Plus, Users, Loader2, Download } from 'lucide-react';
+import { Heart, MessageCircle, User, Dices, Sparkles, ChevronLeft, ChevronRight, Briefcase, Upload, Image as ImageIcon, Send, Settings, RefreshCw, Trash2, Plus, Users, Loader2, Download, Check, Save } from 'lucide-react';
 import { sendCoreMessage, KokoPrompt, ChatMessage } from '../services/coreAi';
+import { generateNPCs, generateNPCResponse, extractJSON } from '../services/geminiService';
 
 const personalities = [
   { group: "Tư Duy & Phân Tích", items: ["Tư duy logic", "Phân tích sâu", "Lý trí", "Chiến lược", "Sáng tạo", "Độc đáo", "Trực giác", "Tò mò", "Nghiên cứu", "Khoa học", "Tư duy phản biện", "Tập trung cao", "Khách quan", "Tổng quan", "Chi tiết", "Thực tế", "Thực dụng", "Hiện đại", "Đổi mới", "Trải nghiệm"] },
@@ -52,6 +53,9 @@ interface Profile {
   appBackground: string;
   profileBackground: string;
   chatBackground: string;
+  avatarBg: string;
+  npcCustomAvatars: Record<string, string>;
+  npcCustomBgs: Record<string, string>;
   chatMode: 'online' | 'novel';
   novelMinChars: number;
   novelMaxChars: number;
@@ -68,7 +72,10 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           ...p,
           npcPreferences: p.npcPreferences || { age: [], personality: [], gender: [], hobbies: [], career: [] },
           contacts: p.contacts || [],
-          userPosts: p.userPosts || []
+          userPosts: p.userPosts || [],
+          avatarBg: p.avatarBg || '#F3B4C2',
+          npcCustomAvatars: p.npcCustomAvatars || {},
+          npcCustomBgs: p.npcCustomBgs || {}
         }));
       }
       
@@ -93,6 +100,9 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         appBackground: oldBg,
         profileBackground: oldProfileBg,
         chatBackground: oldChatBg,
+        avatarBg: '#F3B4C2',
+        npcCustomAvatars: {},
+        npcCustomBgs: {},
         chatMode: 'online',
         novelMinChars: 500,
         novelMaxChars: 2000
@@ -112,6 +122,9 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         appBackground: '',
         profileBackground: '',
         chatBackground: '',
+        avatarBg: '#F3B4C2',
+        npcCustomAvatars: {},
+        npcCustomBgs: {},
         chatMode: 'online',
         novelMinChars: 500,
         novelMaxChars: 2000
@@ -175,6 +188,9 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   const [showTrialEndModal, setShowTrialEndModal] = useState(false);
   const [activeNpcProfile, setActiveNpcProfile] = useState<any>(null);
   const [chatBackground, setChatBackground] = useState(currentProfile.chatBackground);
+  const [avatarBg, setAvatarBg] = useState(currentProfile.avatarBg || '#F3B4C2');
+  const [npcCustomAvatars, setNpcCustomAvatars] = useState<Record<string, string>>(currentProfile.npcCustomAvatars || {});
+  const [npcCustomBgs, setNpcCustomBgs] = useState<Record<string, string>>(currentProfile.npcCustomBgs || {});
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>(currentProfile.chatMessages);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -195,6 +211,8 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostImage, setNewPostImage] = useState<string | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [customizingNpc, setCustomizingNpc] = useState<any>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const isSwitching = useRef(false);
 
@@ -234,6 +252,8 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   const npcImageInputRef = useRef<HTMLInputElement>(null);
   const chatBgInputRef = useRef<HTMLInputElement>(null);
   const userPostImageInputRef = useRef<HTMLInputElement>(null);
+  const npcCustomAvatarInputRef = useRef<HTMLInputElement>(null);
+  const npcCustomBgInputRef = useRef<HTMLInputElement>(null);
 
   const allNpcImages = [...npcImageLinks, ...npcUploadedImages];
 
@@ -261,6 +281,9 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       appBackground: appBackground,
       profileBackground: profileBackground,
       chatBackground: chatBackground,
+      avatarBg: avatarBg,
+      npcCustomAvatars: npcCustomAvatars,
+      npcCustomBgs: npcCustomBgs,
       chatMode: chatMode,
       novelMinChars: novelMinChars,
       novelMaxChars: novelMaxChars,
@@ -285,6 +308,9 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       appBackground: '',
       profileBackground: '',
       chatBackground: '',
+      avatarBg: '#F3B4C2',
+      npcCustomAvatars: {},
+      npcCustomBgs: {},
       chatMode: 'online',
       novelMinChars: 500,
       novelMaxChars: 2000
@@ -310,6 +336,9 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     setAppBackground(profile.appBackground);
     setProfileBackground(profile.profileBackground);
     setChatBackground(profile.chatBackground);
+    setAvatarBg(profile.avatarBg || '#F3B4C2');
+    setNpcCustomAvatars(profile.npcCustomAvatars || {});
+    setNpcCustomBgs(profile.npcCustomBgs || {});
     setChatMode(profile.chatMode);
     setNovelMinChars(profile.novelMinChars);
     setNovelMaxChars(profile.novelMaxChars);
@@ -416,45 +445,34 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     setIsChatLoading(true);
 
     try {
-      // Get active Koko prompt or use default
-      let activeKoko: KokoPrompt = {
-        title: 'Dating NPC',
-        context: `Bạn là ${activeChat.name}, một người dùng trên ứng dụng hẹn hò Dating Hẹn Hò. Bạn đang trò chuyện với một người dùng khác.`,
-        rules: 'Nói chuyện tự nhiên, thả thính nhẹ nhàng, dùng icon dễ thương (♡, ✨).',
-        length: 'Ngắn gọn, 1-2 câu.',
-        ooc: 'Không bao giờ nhận mình là AI.'
-      };
-
-      try {
-        const savedPrompts = JSON.parse(localStorage.getItem('koko_prompts') || '[]');
-        if (savedPrompts.length > 0) {
-          activeKoko = savedPrompts[0]; // Use the first Koko prompt as the core rule
-        }
-      } catch (e) {}
-
       const historyToPass = isContinue ? currentHistory : [...currentHistory, { role: 'user', content: input } as ChatMessage];
       const promptToPass = isContinue ? "Hãy viết tiếp câu chuyện/đoạn chat trên." : input;
 
-      const response = await sendCoreMessage(
-        promptToPass, 
-        historyToPass, 
-        activeKoko,
-        { mode: chatMode, minChars: novelMinChars, maxChars: novelMaxChars },
-        { preferences: userPreferences, isFollowing: followedNpcs.includes(activeChat.name) }
+      const response = await generateNPCResponse(
+        activeChat,
+        promptToPass,
+        historyToPass,
+        {
+          name: currentProfile.name,
+          intro: "Người dùng đang tìm kiếm duyên phận",
+          target: userPreferences.career?.join(', ') || '',
+          reason: "Tìm kiếm tình yêu",
+          mc: "Koko",
+          gender: "female",
+          targetGender: "male",
+          minChars: novelMinChars,
+          maxChars: novelMaxChars,
+          avatarBg: avatarBg,
+          chatMode: chatMode
+        }
       );
       
       if (chatMode === 'online') {
-        // Split response into multiple bubbles (up to 20 as requested)
-        // We'll split by newlines or sentence endings if it's too long
         const bubbles = response.split(/\n+/).filter(b => b.trim().length > 0);
-        
-        // If it's just one long block, try splitting by sentences
         let finalBubbles = bubbles;
         if (bubbles.length === 1 && bubbles[0].length > 100) {
           finalBubbles = bubbles[0].split(/(?<=[.!?])\s+/).filter(b => b.trim().length > 0);
         }
-
-        // Limit to 20 bubbles
         const limitedBubbles = finalBubbles.slice(0, 20);
 
         setChatMessages(prev => {
@@ -506,8 +524,6 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     const historyToPass = currentMsgs.slice(0, lastUserMsgIndex);
     const userPrompt = currentMsgs[lastUserMsgIndex].content;
 
-    // Remove the message being regenerated (and any after it if we want, but let's just replace this one)
-    // Actually, it's better to remove all messages from the regenerated one onwards
     setChatMessages(prev => ({
       ...prev,
       [chatId]: currentMsgs.slice(0, index)
@@ -522,27 +538,23 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     setChatLoadingMsg(msgs[Math.floor(Math.random() * msgs.length)]);
     setIsChatLoading(true);
     try {
-      let activeKoko: KokoPrompt = {
-        title: 'Dating NPC',
-        context: `Bạn là ${activeChat.name}, một người dùng trên ứng dụng hẹn hò Dating Hẹn Hò. Bạn đang trò chuyện với một người dùng khác.`,
-        rules: 'Nói chuyện tự nhiên, thả thính nhẹ nhàng, dùng icon dễ thương (♡, ✨).',
-        length: 'Ngắn gọn, 1-2 câu.',
-        ooc: 'Không bao giờ nhận mình là AI.'
-      };
-
-      try {
-        const savedPrompts = JSON.parse(localStorage.getItem('koko_prompts') || '[]');
-        if (savedPrompts.length > 0) {
-          activeKoko = savedPrompts[0];
+      const response = await generateNPCResponse(
+        activeChat,
+        userPrompt,
+        historyToPass,
+        {
+          name: currentProfile.name,
+          intro: "Người dùng đang tìm kiếm duyên phận",
+          target: userPreferences.career?.join(', ') || '',
+          reason: "Tìm kiếm tình yêu",
+          mc: "Koko",
+          gender: "female",
+          targetGender: "male",
+          minChars: novelMinChars,
+          maxChars: novelMaxChars,
+          avatarBg: avatarBg,
+          chatMode: chatMode
         }
-      } catch (e) {}
-
-      const response = await sendCoreMessage(
-        userPrompt, 
-        historyToPass, 
-        activeKoko,
-        { mode: chatMode, minChars: novelMinChars, maxChars: novelMaxChars },
-        { preferences: userPreferences, isFollowing: followedNpcs.includes(activeChat.name) }
       );
       
       if (chatMode === 'online') {
@@ -583,59 +595,82 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     setChatLoadingMsg(`Sách Thế Giới đang kết nối với ${count} NPC mới... ♡`);
     
     try {
-      const selectedNames = Array.from({ length: count }).map(() => randomNames[Math.floor(Math.random() * randomNames.length)]);
+      // Batching for large counts to ensure quality and avoid token limits
+      const batchSize = 10;
+      const totalBatches = Math.ceil(count / batchSize);
       
-      const prompt = `Hãy viết ${count} bài đăng tâm trạng hoặc chia sẻ cuộc sống cho một ứng dụng hẹn hò. 
-      Các nhân vật có tên là: ${selectedNames.join(', ')}. 
-      Yêu cầu: Mỗi nội dung phải trên 500 ký tự, sâu sắc, thu hút và tự nhiên. 
-      Trả về danh sách theo định dạng: Tên NPC | Nội dung bài viết. 
-      Mỗi bài đăng phân tách bằng dấu xuống dòng. 
-      Chỉ trả về danh sách bài viết, không thêm bất kỳ lời dẫn nào khác.`;
-
-      const koko: KokoPrompt = {
-        title: "Người dùng Sách Thế Giới",
-        context: `Bạn đang tạo ${count} bài đăng cho các NPC trên ứng dụng hẹn hò Sách Thế Giới.`,
-        rules: "Viết bài đăng dài trên 500 ký tự cho mỗi NPC. Định dạng: Tên NPC | Nội dung. Mỗi dòng một bài.",
-        length: `Ít nhất ${count} bài đăng.`,
-        ooc: "Không OOC."
-      };
-
-      const response = await sendCoreMessage(prompt, [], koko);
-      
-      const lines = response.split('\n').filter(line => line.includes('|'));
-      const newPosts = lines.map((line, i) => {
-        const parts = line.split('|');
-        const name = parts[0]?.trim() || selectedNames[i % selectedNames.length];
-        const content = parts.slice(1).join('|').trim();
+      for (let b = 0; b < totalBatches; b++) {
+        const currentBatchCount = Math.min(batchSize, count - b * batchSize);
+        const selectedNames = Array.from({ length: currentBatchCount }).map(() => randomNames[Math.floor(Math.random() * randomNames.length)]);
         
-        const avatar = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
-        const image = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
-        
-        return {
-          id: Date.now() + i + Math.random(),
-          name,
-          avatar,
-          image,
-          content: content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡',
-          comments: 0,
-          commentsList: []
-        };
-      });
+        setChatLoadingMsg(`Đang tải đợt ${b + 1}/${totalBatches} (${currentBatchCount} NPC)... ♡`);
 
-      if (newPosts.length === 0) {
-        // Fallback if formatting fails
-        const fallbackPost = {
-          id: Date.now(),
-          name: selectedNames[0],
-          avatar: allNpcImages[0],
-          image: allNpcImages[1],
-          content: response.trim() || 'Đang lướt app Sách Thế Giới tìm bạn... ♡',
-          comments: 0,
-          commentsList: []
+        const prompt = `Hãy tạo ${currentBatchCount} bài đăng tâm trạng hoặc chia sẻ cuộc sống cho một ứng dụng hẹn hò. 
+        Các nhân vật có tên là: ${selectedNames.join(', ')}. 
+        YÊU CẦU CỰC KỲ QUAN TRỌNG: 
+        1. Mỗi nội dung bài viết PHẢI DÀI TRÊN 500 KÝ TỰ. 
+        2. Nội dung phải sâu sắc, thu hút, tự nhiên và mang đậm cá tính riêng.
+        3. TRẢ VỀ MẢNG JSON CỦA CÁC OBJECT: [{"name": "Tên NPC", "content": "Nội dung bài viết"}, ... ]. 
+        KHÔNG GIẢI THÍCH, KHÔNG SUY NGHĨ (THINKING), KHÔNG MARKDOWN, KHÔNG CÓ BẤT KỲ CHỮ NÀO KHÁC NGOÀI JSON.`;
+
+        const koko: KokoPrompt = {
+          title: "Người dùng Sách Thế Giới",
+          context: `Bạn đang tạo ${currentBatchCount} bài đăng chất lượng cao cho các NPC trên ứng dụng hẹn hò Sách Thế Giới.`,
+          rules: "BẮT BUỘC viết bài đăng dài trên 500 ký tự cho mỗi NPC. Trả về mảng JSON.",
+          length: `Mỗi bài đăng tối thiểu 500 ký tự.`,
+          ooc: "Không OOC."
         };
-        setNpcPosts(prev => [...prev, fallbackPost]);
-      } else {
-        setNpcPosts(prev => [...prev, ...newPosts]);
+
+        try {
+          const response = await sendCoreMessage(prompt, [], koko);
+          console.log(`Response for batch ${b + 1}:`, response);
+          
+          const parsed = extractJSON(response);
+          console.log(`Parsed JSON for batch ${b + 1}:`, parsed);
+          if (Array.isArray(parsed)) {
+            const newPosts = parsed.map((item: any, i: number) => {
+              const name = item.name || selectedNames[i % selectedNames.length];
+              const content = item.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡';
+              
+              const avatar = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
+              const image = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
+              
+              return {
+                id: Date.now() + i + Math.random(),
+                name,
+                avatar,
+                image,
+                content: content,
+                comments: 0,
+                commentsList: []
+              };
+            });
+            setNpcPosts(prev => [...prev, ...newPosts]);
+          } else if (response.trim()) {
+            // Fallback if not JSON but has content
+            const fallbackPost = {
+              id: Date.now() + Math.random(),
+              name: selectedNames[0],
+              avatar: allNpcImages[0],
+              image: allNpcImages[1],
+              content: response.trim().substring(0, 2000),
+              comments: 0,
+              commentsList: []
+            };
+            setNpcPosts(prev => [...prev, fallbackPost]);
+          }
+          
+          // Add a small delay between batches to avoid rate limits
+          if (b < totalBatches - 1) {
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        } catch (err: any) {
+          console.error(`Error in batch ${b + 1}:`, err);
+          if (err.message.includes('Token') || err.message.includes('limit')) {
+            setChatLoadingMsg(`Lỗi giới hạn Token ở đợt ${b + 1}. Đang thử đợt tiếp theo...`);
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
       }
     } catch (error) {
       console.error('Error loading NPC posts:', error);
@@ -685,7 +720,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     if (!post) return;
 
     setIsChatLoading(true);
-    setChatLoadingMsg('Hệ thống đang tạo 100 bình luận từ các NPC khác... ♡');
+    setChatLoadingMsg('Hệ thống đang gọi 100 NPC vào bình luận... ♡');
     
     try {
       // Add to contacts if not exists
@@ -693,36 +728,51 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         setContacts(prev => [...prev, { id: post.id, name: post.name, avatar: post.avatar, lastMessage: 'Vừa thả tim bài đăng của họ' }]);
       }
 
-      const prompt = `Dựa trên bài đăng của ${npcName} với nội dung: "${post.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡'}", 
-      hãy tạo ra 100 bình luận ngắn (dưới 15 từ), tự nhiên, đa dạng từ các NPC khác nhau. 
-      Các bình luận phải thể hiện sự quan tâm, đồng cảm, khen ngợi hoặc đặt câu hỏi liên quan đến nội dung bài viết.
-      Phong cách: trẻ trung, dễ thương, thả thính, khen ngợi, hoặc hỏi thăm. 
-      Yêu cầu: Trả về danh sách 100 bình luận, mỗi bình luận trên một dòng, KHÔNG đánh số, KHÔNG có ký tự đặc biệt ở đầu dòng.`;
+      const totalComments = 100;
+      const batchSize = 20;
+      const totalBatches = Math.ceil(totalComments / batchSize);
+      let allComments: string[] = [];
 
-      const koko: KokoPrompt = {
-        title: 'Dating App NPC Comments Generator',
-        context: `Bạn là một hệ thống tạo bình luận tự động cho mạng xã hội hẹn hò. Bạn đang tạo bình luận cho bài đăng của ${npcName}.`,
-        rules: 'Tạo 100 bình luận ngắn, mỗi bình luận một dòng. Không đánh số. Không có ký tự đặc biệt ở đầu.',
-        length: '100 dòng',
-        ooc: 'Không OOC'
-      };
+      for (let b = 0; b < totalBatches; b++) {
+        const currentBatchCount = Math.min(batchSize, totalComments - allComments.length);
+        setChatLoadingMsg(`Đang tạo bình luận đợt ${b + 1}/${totalBatches}... ♡`);
 
-      const response = await sendCoreMessage(prompt, [], koko, {
-        mode: 'online',
-        minChars: 10,
-        maxChars: 100
-      }, {
-        preferences: currentProfile.preferences,
-        isFollowing: followedNpcs.includes(npcName)
-      });
+        const prompt = `Dựa trên bài đăng của ${npcName} với nội dung: "${post.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡'}", 
+        hãy tạo ra ${currentBatchCount} bình luận ngắn (dưới 15 từ), tự nhiên, đa dạng từ các NPC khác nhau. 
+        Các bình luận phải thể hiện sự quan tâm, đồng cảm, khen ngợi hoặc đặt câu hỏi liên quan đến nội dung bài viết.
+        Phong cách: trẻ trung, dễ thương, thả thính, khen ngợi, hoặc hỏi thăm. 
+        Yêu cầu: Trả về danh sách ${currentBatchCount} bình luận, mỗi bình luận trên một dòng, KHÔNG đánh số, KHÔNG có ký tự đặc biệt ở đầu dòng.`;
 
-      const newComments = response.split('\n').filter(line => line.trim().length > 0).slice(0, 100) || [];
-      
-      setNpcPosts(prev => prev.map(p => p.id === postId ? { 
-        ...p, 
-        comments: p.comments + newComments.length,
-        commentsList: [...(p.commentsList || []), ...newComments]
-      } : p));
+        const koko: KokoPrompt = {
+          title: 'Dating App NPC Comments Generator',
+          context: `Bạn là một hệ thống tạo bình luận tự động cho mạng xã hội hẹn hò. Bạn đang tạo bình luận đợt ${b + 1} cho bài đăng của ${npcName}.`,
+          rules: `Tạo ${currentBatchCount} bình luận ngắn, mỗi bình luận một dòng. Không đánh số. Không có ký tự đặc biệt ở đầu.`,
+          length: `${currentBatchCount} dòng`,
+          ooc: 'Không OOC'
+        };
+
+        try {
+          const response = await sendCoreMessage(prompt, [], koko, {
+            mode: 'online',
+            minChars: 10,
+            maxChars: 100
+          });
+
+          const batchComments = response.split('\n').filter(line => line.trim().length > 0).slice(0, currentBatchCount);
+          allComments = [...allComments, ...batchComments];
+          
+          // Update UI incrementally
+          setNpcPosts(prev => prev.map(p => p.id === postId ? { 
+            ...p, 
+            comments: p.comments + batchComments.length,
+            commentsList: [...(p.commentsList || []), ...batchComments]
+          } : p));
+
+          if (b < totalBatches - 1) await new Promise(r => setTimeout(r, 800));
+        } catch (err) {
+          console.error(`Error in comment batch ${b + 1}:`, err);
+        }
+      }
 
       setFollowedNpcs(prev => {
         if (!prev.includes(npcName)) {
@@ -765,56 +815,68 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     if (!post) return;
 
     setIsChatLoading(true);
-    setChatLoadingMsg('Đang gọi 100 NPC vào bình luận bài của bạn... ♡');
+    setChatLoadingMsg('Hệ thống đang gọi 100 NPC vào bình luận... ♡');
 
     try {
-      // Get related NPCs from contacts or just some random ones if none
-      const relatedNpcs = Array.from({ length: 100 }).map((_, i) => ({
-        name: randomNames[Math.floor(Math.random() * randomNames.length)],
-        avatar: npcImageLinks[Math.floor(Math.random() * npcImageLinks.length)]
-      }));
-
-      const npcNames = relatedNpcs.slice(0, 20).map(n => n.name).join(', ');
+      const totalComments = 100;
+      const batchSize = 20;
+      const totalBatches = Math.ceil(totalComments / batchSize);
       
-      const prompt = `Người dùng vừa đăng một bài viết với nội dung: "${post.content}". 
-      Hãy tạo ra 100 bình luận từ các NPC khác nhau. 
-      Mỗi NPC nên có một bình luận riêng biệt, tự nhiên, thể hiện tính cách của họ.
-      Yêu cầu: Trả về danh sách 100 bình luận theo định dạng: Tên NPC | Nội dung bình luận. 
-      Mỗi bình luận trên một dòng. Không đánh số.`;
+      for (let b = 0; b < totalBatches; b++) {
+        const currentBatchCount = Math.min(batchSize, totalComments - (b * batchSize));
+        setChatLoadingMsg(`Đang tạo bình luận đợt ${b + 1}/${totalBatches}... ♡`);
 
-      const koko: KokoPrompt = {
-        title: 'User Post NPC Comments Generator',
-        context: `Bạn là một hệ thống tạo bình luận từ NPC cho bài đăng của người dùng.`,
-        rules: 'Tạo 100 bình luận từ danh sách NPC. Định dạng: Tên NPC | Nội dung. Mỗi dòng một bình luận.',
-        length: `100 dòng`,
-        ooc: 'Không OOC'
-      };
+        const relatedNpcs = Array.from({ length: currentBatchCount }).map((_, i) => ({
+          name: randomNames[Math.floor(Math.random() * randomNames.length)],
+          avatar: npcImageLinks[Math.floor(Math.random() * npcImageLinks.length)]
+        }));
+        
+        const prompt = `Người dùng vừa đăng một bài viết với nội dung: "${post.content}". 
+        Hãy tạo ra ${currentBatchCount} bình luận từ các NPC khác nhau. 
+        Mỗi NPC nên có một bình luận riêng biệt, tự nhiên, thể hiện tính cách của họ.
+        Yêu cầu: Trả về danh sách ${currentBatchCount} bình luận theo định dạng: Tên NPC | Nội dung bình luận. 
+        Mỗi bình luận trên một dòng. Không đánh số.`;
 
-      const response = await sendCoreMessage(prompt, [], koko, {
-        mode: 'online',
-        minChars: 10,
-        maxChars: 100
-      });
-
-      const lines = response.split('\n').filter(line => line.includes('|'));
-      const newComments = lines.map((line, i) => {
-        const [name, content] = line.split('|').map(s => s.trim());
-        const npc = relatedNpcs[i % relatedNpcs.length];
-        return {
-          id: Math.random().toString(),
-          authorName: name || npc.name,
-          authorAvatar: npc.avatar,
-          content: content || 'Bài viết hay quá! ♡',
-          createdAt: new Date().toISOString()
+        const koko: KokoPrompt = {
+          title: 'User Post NPC Comments Generator',
+          context: `Bạn là một hệ thống tạo bình luận từ NPC cho bài đăng của người dùng. Đợt ${b + 1}.`,
+          rules: `Tạo ${currentBatchCount} bình luận từ danh sách NPC. Định dạng: Tên NPC | Nội dung. Mỗi dòng một bình luận.`,
+          length: `${currentBatchCount} dòng`,
+          ooc: 'Không OOC'
         };
-      });
 
-      setUserPosts(prev => prev.map(p => p.id === postId ? {
-        ...p,
-        comments: [...p.comments, ...newComments]
-      } : p));
+        try {
+          const response = await sendCoreMessage(prompt, [], koko, {
+            mode: 'online',
+            minChars: 10,
+            maxChars: 100
+          });
 
-      showToast(`Đã có ${newComments.length} NPC bình luận bài của bạn ♡`);
+          const lines = response.split('\n').filter(line => line.includes('|')).slice(0, currentBatchCount);
+          const batchComments = lines.map((line, i) => {
+            const [name, content] = line.split('|').map(s => s.trim());
+            const npc = relatedNpcs[i % relatedNpcs.length];
+            return {
+              id: Math.random().toString(),
+              authorName: name || npc.name,
+              authorAvatar: npc.avatar,
+              content: content || 'Bài viết hay quá! ♡',
+              createdAt: new Date().toISOString()
+            };
+          });
+
+          setUserPosts(prev => prev.map(p => p.id === postId ? {
+            ...p,
+            comments: [...p.comments, ...batchComments]
+          } : p));
+
+          if (b < totalBatches - 1) await new Promise(r => setTimeout(r, 800));
+        } catch (err) {
+          console.error(`Error in user post comment batch ${b + 1}:`, err);
+        }
+      }
+
+      showToast(`Đã có thêm NPC bình luận bài của bạn ♡`);
     } catch (error) {
       console.error('Error generating user post comments:', error);
       showToast('Không thể gọi NPC lúc này, thử lại sau nhé ♡');
@@ -1094,48 +1156,193 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     </div>
   );
 
+  const handleSaveProfile = () => {
+    setIsSaved(true);
+    const updatedProfiles = profiles.map(p => p.id === currentProfileId ? {
+      ...p,
+      avatar: userAvatar,
+      preferences: userPreferences,
+      npcPreferences: npcPreferences,
+      followedNpcs: followedNpcs,
+      chatMessages: chatMessages,
+      contacts: contacts,
+      appBackground: appBackground,
+      profileBackground: profileBackground,
+      chatBackground: chatBackground,
+      avatarBg: avatarBg,
+      npcCustomAvatars: npcCustomAvatars,
+      npcCustomBgs: npcCustomBgs,
+      chatMode: chatMode,
+      novelMinChars: novelMinChars,
+      novelMaxChars: novelMaxChars,
+      userPosts: userPosts
+    } : p);
+    setProfiles(updatedProfiles);
+    localStorage.setItem('dating_profiles', JSON.stringify(updatedProfiles));
+    localStorage.setItem('dating_npc_images', JSON.stringify(npcUploadedImages));
+    showToast('Đã lưu hồ sơ và toàn bộ dữ liệu thành công ♡');
+    setTimeout(() => setIsSaved(false), 3000);
+  };
+
+  const handleNpcCustomAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && customizingNpc) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        setNpcCustomAvatars(prev => ({
+          ...prev,
+          [customizingNpc.id || customizingNpc.name]: result
+        }));
+        showToast(`Đã cập nhật avatar cho ${customizingNpc.name} ♡`);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleNpcCustomBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && customizingNpc) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        setNpcCustomBgs(prev => ({
+          ...prev,
+          [customizingNpc.id || customizingNpc.name]: result
+        }));
+        showToast(`Đã cập nhật nền cho ${customizingNpc.name} ♡`);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleStartChat = async (npc: any) => {
+    setActiveChat(npc);
+    if (!contacts.find(c => c.id === (npc.id || npc.name))) {
+      setContacts(prev => [...prev, npc]);
+    }
+    
+    // Auto-greeting if new chat
+    const npcId = npc.id || npc.name;
+    const existingMsgs = chatMessages[npcId] || [];
+    if (existingMsgs.length === 0) {
+      setIsChatLoading(true);
+      setChatLoadingMsg('Đang kết nối với duyên phận... ♡');
+      try {
+        const greeting = await generateNPCResponse(
+          npc, 
+          `Hãy gửi lời chào đầu tiên thật ấn tượng, ngọt ngào và ${chatMode === 'novel' ? `rất dài (khoảng ${novelMinChars}-${novelMaxChars} ký tự)` : 'ngắn gọn'}.`, 
+          [], 
+          {
+            name: currentProfile.name,
+            intro: (userPreferences.intro && userPreferences.intro[0]) || "Người dùng đang tìm kiếm duyên phận",
+            target: userPreferences.career?.join(', ') || '',
+            reason: "Tìm kiếm tình yêu",
+            mc: "Koko",
+            gender: "female",
+            targetGender: "male",
+            minChars: chatMode === 'novel' ? novelMinChars : 50,
+            maxChars: chatMode === 'novel' ? novelMaxChars : 300,
+            avatarBg: avatarBg,
+            chatMode: chatMode
+          }
+        );
+        const newMsg: ChatMessage = { role: 'assistant', content: greeting };
+        setChatMessages(prev => ({
+          ...prev,
+          [npcId]: [newMsg]
+        }));
+      } catch (err) {
+        console.error("Lỗi khi gọi API chào mừng:", err);
+      } finally {
+        setIsChatLoading(false);
+      }
+    }
+  };
+
   const renderFeed = () => (
     <div className="p-4 pb-24">
-      {npcPosts.map(post => (
-        <div key={post.id} className="bg-white/60 backdrop-blur-md mb-4 rounded-[15px] overflow-hidden shadow-sm">
-          <div className="flex items-center p-3 cursor-pointer" onClick={() => setActiveNpcProfile(post)}>
-            <img src={post.avatar} className="w-10 h-10 rounded-full object-cover border-2 border-white" />
-            <span className="ml-3 font-semibold text-[#5a5255]">{post.name}</span>
-          </div>
-          <img src={post.image} className="w-full h-auto block" />
-          <div className="p-3 flex items-center justify-between">
-            <span className="text-[#F3B4C2]"><Heart size={24} /></span>
-            <button 
-              onClick={() => handleNpcPostHeart(post.id, post.name)}
-              className="w-10 h-10 rounded-full bg-[#F3B4C2] text-white flex items-center justify-center shadow-sm active:scale-95 transition-transform"
-            >
-              <Sparkles size={18} />
-            </button>
-          </div>
-          <div className="px-3 pb-3 text-sm text-[#5a5255]">
-            <b>{post.name}</b> {post.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡ #pinkvibe'}
-            {post.comments > 0 && (
-              <div className="text-xs text-[#8c8286] mt-1">Đã kết nối {post.comments} người ngẫu nhiên tương tác ♡</div>
-            )}
-            {post.commentsList && post.commentsList.length > 0 && (
-              <div className="mt-3 space-y-2 max-h-[200px] overflow-y-auto pr-1 custom-scrollbar">
-                {post.commentsList.map((comment: string, idx: number) => (
-                  <div key={idx} className="bg-pink-50/50 p-2 rounded-lg text-xs border border-pink-100/50">
-                    <span className="font-bold text-[#F3B4C2] mr-1">NPC_{idx + 1}:</span>
-                    {comment}
-                  </div>
-                ))}
+      {npcPosts.map(post => {
+        const customAvatar = npcCustomAvatars[post.id || post.name];
+        const customBg = npcCustomBgs[post.id || post.name];
+        
+        return (
+          <div key={post.id} className="bg-white/60 backdrop-blur-md mb-4 rounded-[15px] overflow-hidden shadow-sm">
+            <div className="flex items-center p-3 justify-between">
+              <div className="flex items-center cursor-pointer flex-1" onClick={() => setActiveNpcProfile(post)}>
+                <div 
+                  className="w-10 h-10 rounded-full border-2 border-white shadow-sm bg-cover bg-center overflow-hidden"
+                  style={{ 
+                    backgroundImage: `url('${customAvatar || post.avatar}')`,
+                    backgroundColor: customBg || avatarBg
+                  }}
+                />
+                <span className="ml-3 font-semibold text-[#5a5255]">{post.name}</span>
               </div>
-            )}
+              <div className="flex gap-1">
+                <button 
+                  onClick={() => {
+                    setCustomizingNpc(post);
+                    npcCustomAvatarInputRef.current?.click();
+                  }}
+                  className="p-1.5 bg-white/50 rounded-full text-[#F3B4C2] hover:bg-white transition-colors"
+                  title="Đổi Avatar"
+                >
+                  <Upload size={14} />
+                </button>
+                <button 
+                  onClick={() => {
+                    setCustomizingNpc(post);
+                    npcCustomBgInputRef.current?.click();
+                  }}
+                  className="p-1.5 bg-white/50 rounded-full text-[#F3B4C2] hover:bg-white transition-colors"
+                  title="Đổi Nền"
+                >
+                  <ImageIcon size={14} />
+                </button>
+              </div>
+            </div>
+            <img src={post.image} className="w-full h-auto block" />
+            <div className="p-3 flex items-center justify-between">
+              <span className="text-[#F3B4C2]"><Heart size={24} /></span>
+              <button 
+                onClick={() => handleNpcPostHeart(post.id, post.name)}
+                className="w-10 h-10 rounded-full bg-[#F3B4C2] text-white flex items-center justify-center shadow-sm active:scale-95 transition-transform"
+              >
+                <Sparkles size={18} />
+              </button>
+            </div>
+            <div className="px-3 pb-3 text-sm text-[#5a5255]">
+              <b>{post.name}</b> {post.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡ #pinkvibe'}
+              {post.comments > 0 && (
+                <div className="text-xs text-[#8c8286] mt-1">Đã kết nối {post.comments} người ngẫu nhiên tương tác ♡</div>
+              )}
+              {post.commentsList && post.commentsList.length > 0 && (
+                <div className="mt-3 space-y-2 max-h-[200px] overflow-y-auto pr-1 custom-scrollbar">
+                  {post.commentsList.map((comment: string, idx: number) => (
+                    <div key={idx} className="bg-pink-50/50 p-2 rounded-lg text-xs border border-pink-100/50">
+                      <span className="font-bold text-[#F3B4C2] mr-1">NPC_{idx + 1}:</span>
+                      {comment}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
-      <div className="text-center mt-4">
+        );
+      })}
+      <div className="flex flex-col gap-3 mt-6 px-4">
         <button 
           onClick={() => loadMoreNpcPosts(10)}
-          className="px-6 py-3 rounded-full bg-[#F3B4C2] text-white font-semibold shadow-md active:scale-95 transition-transform"
+          className="w-full py-3 rounded-full bg-[#F3B4C2] text-white font-semibold shadow-md active:scale-95 transition-transform flex items-center justify-center gap-2"
         >
-          + Hiện thêm 10 NPC
+          <Plus size={18} /> Hiện thêm 10 NPC
+        </button>
+        <button 
+          onClick={() => loadMoreNpcPosts(200)}
+          className="w-full py-3 rounded-full bg-white border-2 border-[#F3B4C2] text-[#F3B4C2] font-bold shadow-md active:scale-95 transition-transform flex items-center justify-center gap-2"
+        >
+          <Sparkles size={18} /> + 200 NPC (Vip)
         </button>
       </div>
     </div>
@@ -1276,13 +1483,22 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       ) : (
         contacts.map((contact, i) => {
           const lastMsg = chatMessages[contact.id || contact.name]?.slice(-1)[0];
+          const customAvatar = npcCustomAvatars[contact.id || contact.name];
+          const customBg = npcCustomBgs[contact.id || contact.name];
+          
           return (
             <div 
               key={i} 
               className="flex items-center p-3 bg-white/40 backdrop-blur-sm border-b border-black/5 mb-2 rounded-xl cursor-pointer hover:bg-white/60 transition-colors" 
-              onClick={() => setActiveChat(contact)}
+              onClick={() => handleStartChat(contact)}
             >
-              <img src={contact.avatar} className="w-12 h-12 rounded-full object-cover border-2 border-white" />
+              <div 
+                className="w-12 h-12 rounded-full border-2 border-white shadow-sm bg-cover bg-center overflow-hidden"
+                style={{ 
+                  backgroundImage: `url('${customAvatar || contact.avatar}')`,
+                  backgroundColor: customBg || avatarBg
+                }}
+              />
               <div className="ml-4 flex-1">
                 <div className="font-semibold text-[#5a5255] mb-1">{contact.name}</div>
                 <div className="text-sm text-[#8c8286] truncate max-w-[200px]">
@@ -1339,6 +1555,14 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="p-5 flex flex-col items-center border-b border-black/5 bg-white/40 backdrop-blur-md">
+        <div className="w-full flex justify-end mb-2">
+          <button 
+            onClick={handleSaveProfile}
+            className={`px-4 py-1.5 rounded-full text-xs font-bold shadow-sm transition-all ${isSaved ? 'bg-green-400 text-white' : 'bg-[#F3B4C2] text-white active:scale-95'}`}
+          >
+            {isSaved ? '✓ Đã lưu' : 'Lưu hồ sơ'}
+          </button>
+        </div>
         <div className="flex items-center w-full mb-4">
           <div className="relative cursor-pointer" onClick={() => avatarInputRef.current?.click()}>
             <img src={userAvatar} className="w-20 h-20 rounded-full object-cover border-2 border-white shadow-sm" />
@@ -1364,6 +1588,17 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           </div>
           <div className="text-[#8c8286] mb-2">✧ Nữ | 23 tuổi | 📍Thái Bình | 🎨 Sách Thế Giới</div>
           <div>Thích lướt TikTok, chụp ảnh outfit, nghe Tarot... đang tìm bạn trai vibe ngoan hiền ♡</div>
+        </div>
+        <div className="w-full mt-6">
+          <button 
+            onClick={handleSaveProfile}
+            className={`w-full py-4 rounded-2xl font-bold shadow-md transition-all flex items-center justify-center gap-2 ${isSaved ? 'bg-green-500 text-white' : 'bg-[#F3B4C2] text-white active:scale-95'}`}
+          >
+            {isSaved ? <><Check size={20} /> Đã lưu tất cả dữ liệu</> : <><Save size={20} /> Lưu hồ sơ & Cài đặt</>}
+          </button>
+          <p className="text-[10px] text-center text-[#8c8286] mt-2 italic">
+            * Toàn bộ thông tin, tin nhắn và cài đặt sẽ được lưu trữ trên trình duyệt của bạn.
+          </p>
         </div>
       </div>
 
@@ -1770,6 +2005,8 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       <input type="file" accept="image/*" className="hidden" ref={bgInputRef} onChange={e => handleImageUpload(e, setAppBackground)} />
       <input type="file" accept="image/*" className="hidden" ref={profileBgInputRef} onChange={e => handleImageUpload(e, setProfileBackground)} />
       <input type="file" accept="image/*" className="hidden" ref={avatarInputRef} onChange={e => handleImageUpload(e, setUserAvatar)} />
+      <input type="file" accept="image/*" className="hidden" ref={npcCustomAvatarInputRef} onChange={handleNpcCustomAvatarUpload} />
+      <input type="file" accept="image/*" className="hidden" ref={npcCustomBgInputRef} onChange={handleNpcCustomBgUpload} />
 
       {/* Global Processing Bar */}
       <AnimatePresence>
@@ -1844,13 +2081,49 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                 <ChevronLeft size={24} className="text-[#5a5255]" />
               </button>
               <div className="font-medium text-[#5a5255]">{activeNpcProfile.name}</div>
-              <div className="w-8" />
+              <button 
+                onClick={handleSaveProfile}
+                className={`p-2 rounded-full transition-colors ${isSaved ? 'text-green-500' : 'text-[#F3B4C2]'}`}
+                title="Lưu hồ sơ"
+              >
+                {isSaved ? <Check size={20} /> : <Save size={20} />}
+              </button>
             </div>
+            <input type="file" accept="image/*" className="hidden" ref={npcCustomBgInputRef} onChange={handleNpcCustomBgUpload} />
             
-            <div className="flex-1">
-              <div className="p-5 flex flex-col items-center border-b border-black/5 bg-white/40 backdrop-blur-md">
+            <div className="flex-1" style={{ backgroundImage: npcCustomBgs[activeNpcProfile.id || activeNpcProfile.name] ? `url('${npcCustomBgs[activeNpcProfile.id || activeNpcProfile.name]}')` : 'none', backgroundSize: 'cover', backgroundPosition: 'center' }}>
+              <div className={`p-5 flex flex-col items-center border-b border-black/5 ${npcCustomBgs[activeNpcProfile.id || activeNpcProfile.name] ? 'bg-white/60' : 'bg-white/40'} backdrop-blur-md`}>
                 <div className="flex items-center w-full mb-4">
-                  <img src={activeNpcProfile.avatar} className="w-20 h-20 rounded-full object-cover border-2 border-white shadow-sm" />
+                  <div 
+                    className="w-20 h-20 rounded-full border-2 border-white shadow-sm bg-cover bg-center overflow-hidden relative"
+                    style={{ 
+                      backgroundImage: `url('${npcCustomAvatars[activeNpcProfile.id || activeNpcProfile.name] || activeNpcProfile.avatar}')`,
+                      backgroundColor: avatarBg
+                    }}
+                  >
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => {
+                          setCustomizingNpc(activeNpcProfile);
+                          npcCustomAvatarInputRef.current?.click();
+                        }}
+                        className="p-2 bg-white/80 rounded-full text-[#F3B4C2] shadow-sm"
+                        title="Đổi Avatar"
+                      >
+                        <Upload size={16} />
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setCustomizingNpc(activeNpcProfile);
+                          npcCustomBgInputRef.current?.click();
+                        }}
+                        className="p-2 bg-white/80 rounded-full text-[#5a5255] shadow-sm"
+                        title="Đổi Nền Hồ Sơ"
+                      >
+                        <ImageIcon size={16} />
+                      </button>
+                    </div>
+                  </div>
                   <div className="flex-1 flex justify-around text-center text-[#5a5255]">
                     <div><div className="font-bold text-lg">{10 + (npcExtraPosts[activeNpcProfile.name]?.length || 0)}</div><div className="text-xs text-[#8c8286]">Posts</div></div>
                     <div><div className="font-bold text-lg">5.2K</div><div className="text-xs text-[#8c8286]">Followers</div></div>
@@ -1858,7 +2131,18 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                   </div>
                 </div>
                 <div className="w-full text-sm leading-relaxed text-[#5a5255]">
-                  <div className="font-bold mb-1">{activeNpcProfile.name}</div>
+                  <div className="font-bold mb-1 flex items-center justify-between">
+                    {activeNpcProfile.name}
+                    <button 
+                      onClick={() => {
+                        setCustomizingNpc(activeNpcProfile);
+                        npcCustomBgInputRef.current?.click();
+                      }}
+                      className="text-xs text-[#F3B4C2] font-bold flex items-center gap-1"
+                    >
+                      <ImageIcon size={12} /> Đổi nền
+                    </button>
+                  </div>
                   <div className="text-[#8c8286] mb-2">✧ Độc thân | Tìm kiếm một nửa yêu thương ♡</div>
                   <div className="p-3 bg-pink-50/50 rounded-xl border border-pink-100/30 text-xs italic">
                     {activeNpcProfile.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡'}
@@ -1885,7 +2169,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                   </button>
                   <button 
                     onClick={() => {
-                      setActiveChat(activeNpcProfile);
+                      handleStartChat(activeNpcProfile);
                       setActiveNpcProfile(null);
                     }}
                     className="px-8 py-2 rounded-full bg-[#F3B4C2] text-white text-sm font-semibold shadow-sm active:scale-95 transition-transform flex items-center gap-2"
@@ -1988,7 +2272,13 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                 <ChevronLeft size={24} className="text-[#5a5255]" />
               </button>
               <div className="flex items-center gap-3 ml-2 flex-1">
-                <img src={activeChat.avatar} className="w-10 h-10 rounded-full object-cover border border-[#E6DDD8]" />
+                <div 
+                  className="w-10 h-10 rounded-full border border-[#E6DDD8] bg-cover bg-center overflow-hidden"
+                  style={{ 
+                    backgroundImage: `url('${npcCustomAvatars[activeChat.id || activeChat.name] || activeChat.avatar}')`,
+                    backgroundColor: npcCustomBgs[activeChat.id || activeChat.name] || avatarBg
+                  }}
+                />
                 <div className="flex flex-col">
                   <div className="font-medium text-[#5a5255] leading-tight">{activeChat.name}</div>
                   {activeChat.isTrial && trialTimer !== null && (
@@ -2000,6 +2290,13 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                 </div>
               </div>
               <div className="flex gap-2">
+                <button 
+                  onClick={handleSaveProfile}
+                  className={`p-2 rounded-full transition-colors ${isSaved ? 'text-green-500' : 'text-[#F3B4C2]'}`}
+                  title="Lưu tất cả"
+                >
+                  {isSaved ? <Check size={20} /> : <Save size={20} />}
+                </button>
                 <button onClick={() => setShowChatSettings(true)} className="p-2 hover:bg-black/5 rounded-full transition-colors text-[#5a5255]">
                   <Settings size={20} />
                 </button>
@@ -2132,22 +2429,30 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                     {chatMode === 'novel' && (
                       <div className="space-y-2">
                         <div>
-                          <label className="text-xs font-medium text-[#8c8286] block mb-1">Ký tự tối thiểu</label>
+                          <label className="text-xs font-medium text-[#8c8286] block mb-1">Ký tự tối thiểu (Novel)</label>
                           <input 
-                            type="number" 
+                            type="range" 
+                            min="500" 
+                            max="2000" 
+                            step="100"
                             value={novelMinChars}
                             onChange={e => setNovelMinChars(Number(e.target.value))}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-md px-2 py-1 text-sm outline-none focus:border-[#F3B4C2]"
+                            className="w-full accent-[#F3B4C2]"
                           />
+                          <div className="text-[10px] text-right text-gray-400">{novelMinChars} ký tự</div>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-[#8c8286] block mb-1">Ký tự tối đa</label>
+                          <label className="text-xs font-medium text-[#8c8286] block mb-1">Ký tự tối đa (Novel)</label>
                           <input 
-                            type="number" 
+                            type="range" 
+                            min="2000" 
+                            max="5000" 
+                            step="100"
                             value={novelMaxChars}
                             onChange={e => setNovelMaxChars(Number(e.target.value))}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-md px-2 py-1 text-sm outline-none focus:border-[#F3B4C2]"
+                            className="w-full accent-[#F3B4C2]"
                           />
+                          <div className="text-[10px] text-right text-gray-400">{novelMaxChars} ký tự</div>
                         </div>
                       </div>
                     )}
