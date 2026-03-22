@@ -17,6 +17,8 @@ export interface ChatSettings {
   mode: 'online' | 'novel';
   minChars: number;
   maxChars: number;
+  maxTokens?: number;
+  timeoutMinutes?: number;
 }
 
 export interface UserContext {
@@ -136,7 +138,9 @@ export const sendCoreMessage = async (
     };
 
     // Increase max_tokens to be safer for larger batches, but allow model to decide if not specified
-    if (chatSettings?.mode === 'novel') {
+    if (chatSettings?.maxTokens) {
+      requestBody.max_tokens = chatSettings.maxTokens;
+    } else if (chatSettings?.mode === 'novel') {
       requestBody.max_tokens = 3000;
     } else {
       // For general tasks, we want enough room for JSON responses or multiple posts

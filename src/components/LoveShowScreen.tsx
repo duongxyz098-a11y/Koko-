@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, Heart, Star, Coffee, MessageCircle, User, Settings, Image as ImageIcon, Loader2, Send } from 'lucide-react';
 import { generateNPCs, generateLoveQuiz, generateCafeScenarios, generateNPCResponse, NPCProfile, QuizQuestion, CafeScenario, UserProfile } from '../services/geminiService';
+import { sendCoreMessage } from '../services/coreAi';
 
 export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   const [activeTab, setActiveTab] = useState<'apply' | 'show'>('apply');
@@ -17,6 +18,18 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'npc', content: string}[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('loveshow_settings');
+    return saved ? JSON.parse(saved) : {
+      maxTokens: 30000,
+      timeoutMinutes: 5
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('loveshow_settings', JSON.stringify(settings));
+  }, [settings]);
   
   // Application Data
   const [formData, setFormData] = useState<UserProfile>(() => {
@@ -91,7 +104,7 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
     
     try {
       const history = chatHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
-      const response = await generateNPCResponse(selectedNpc, userMsg, history, formData);
+      const response = await generateNPCResponse(selectedNpc, userMsg, history, formData, settings.maxTokens, settings.timeoutMinutes);
       setChatHistory(prev => [...prev, { role: 'npc', content: response }]);
     } catch (e) {
       console.error(e);
@@ -115,11 +128,12 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   };
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className="absolute inset-0 bg-[#FFF5F7] z-50 flex flex-col overflow-hidden"
+      className="absolute inset-0 bg-[#FFF5F7] z-50 flex flex-col"
       style={{
         backgroundImage: appBackground ? `url(${appBackground})` : 'none',
         backgroundSize: 'cover',
@@ -133,12 +147,47 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
         </button>
         <h1 className="text-xl font-bold text-[#F3B4C2] font-['Comic_Sans_MS',_cursive]">Show Hẹn Hò</h1>
         <div className="flex gap-2">
+          <button onClick={() => { console.log("Settings button clicked"); setShowSettings(true); }} className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors">
+            <Settings size={20} />
+          </button>
           <button onClick={() => bgInputRef.current?.click()} className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors">
             <ImageIcon size={20} />
           </button>
           <input type="file" ref={bgInputRef} onChange={handleBgChange} accept="image/*" className="hidden" />
         </div>
       </div>
+
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center p-4">
+          {console.log("Modal rendered")}
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <h2 className="text-xl font-bold mb-4">Cài đặt</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold mb-1">Max Tokens</label>
+                <select value={settings.maxTokens} onChange={e => setSettings(s => ({...s, maxTokens: parseInt(e.target.value)}))} className="w-full p-2 border rounded-lg">
+                  <option value={30000}>30,000</option>
+                  <option value={50000}>50,000</option>
+                  <option value={100000}>100,000</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-1">Thời gian chờ (Phút)</label>
+                <input type="number" value={settings.timeoutMinutes} onChange={e => setSettings(s => ({...s, timeoutMinutes: parseInt(e.target.value)}))} className="w-full p-2 border rounded-lg" />
+              </div>
+              <button onClick={() => setShowSettings(false)} className="w-full bg-pink-500 text-white p-2 rounded-lg font-bold">Lưu</button>
+              <button onClick={async () => {
+                try {
+                  await sendCoreMessage("Ping", [], { title: 'Test', context: 'Test', rules: 'Reply "Pong"', length: 'Short', ooc: 'No' });
+                  alert('Kết nối thành công! API Key và Proxy URL đang hoạt động tốt.');
+                } catch (e: any) {
+                  alert('Kết nối thất bại: ' + e.message);
+                }
+              }} className="w-full bg-gray-200 text-gray-800 p-2 rounded-lg font-bold">Kiểm tra kết nối</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex p-4 gap-2 shrink-0">

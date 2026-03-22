@@ -4,7 +4,7 @@ import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera, Heart, Tv, 
 
 const pages = [0, 1, 2];
 
-export default function HomeScreen({ openSettings, openKoko, openDating, openYouTube, openLoveShow, openNovel }: { openSettings: () => void, openKoko: () => void, openDating: () => void, openYouTube: () => void, openLoveShow: () => void, openNovel: () => void }) {
+export default function HomeScreen({ openSettings, openKoko, openDating, openYouTube, openLoveShow, openNovel, openRenGram }: { openSettings: () => void, openKoko: () => void, openDating: () => void, openYouTube: () => void, openLoveShow: () => void, openNovel: () => void, openRenGram: () => void }) {
   const [currentPage, setCurrentPage] = useState(0);
   const [appBackground, setAppBackground] = useState(() => localStorage.getItem('home_bg') || '');
   const bgInputRef = useRef<HTMLInputElement>(null);
@@ -115,6 +115,13 @@ export default function HomeScreen({ openSettings, openKoko, openDating, openYou
                     <BookOpen size={32} />
                   </div>
                   <span className="text-[11px] font-medium text-gray-700">Novel</span>
+                </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openRenGram}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <Camera size={32} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">RenGram</span>
                 </div>
 
                 {/* Widget 2x2 */}

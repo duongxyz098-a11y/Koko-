@@ -118,6 +118,23 @@ export function extractJSON(text: string) {
   return [];
 }
 
+export function getDynamicLimits(input: string, history: any[], mode: 'chat' | 'novel' | 'online'): { maxTokens: number, timeoutMinutes: number } {
+  const inputLength = input.length + history.reduce((acc, m) => acc + (m.content?.length || 0), 0);
+  const isNovel = mode === 'novel';
+  
+  // Base tokens for overhead
+  const baseTokens = isNovel ? 5000 : 2000;
+  // Tokens per character (approx 0.5 token per char for Vietnamese)
+  const tokensPerChar = 0.5;
+  
+  const estimatedTokens = Math.min(500000, baseTokens + Math.ceil(inputLength * tokensPerChar));
+  
+  // Timeout: 1 minute per 50k tokens, min 2 mins, max 15 mins
+  const estimatedTimeout = Math.max(2, Math.min(15, Math.ceil(estimatedTokens / 50000)));
+  
+  return { maxTokens: estimatedTokens, timeoutMinutes: estimatedTimeout };
+}
+
 export interface UserProfile {
   name: string;
   intro: string;
@@ -251,10 +268,14 @@ export async function generateCafeScenarios(count: number): Promise<CafeScenario
   return allScenarios;
 }
 
-export async function generateNPCResponse(npc: any, userMessage: string, chatHistory: any[], userProfile: UserProfile): Promise<string> {
+export async function generateNPCResponse(npc: any, userMessage: string, chatHistory: any[], userProfile: UserProfile, maxTokens?: number, timeoutMinutes?: number): Promise<string> {
   const isNovel = userProfile.chatMode === 'novel';
   const min = userProfile.minChars || (isNovel ? 2000 : 50);
   const max = userProfile.maxChars || (isNovel ? 3000 : 200);
+
+  const dynamicLimits = getDynamicLimits(userMessage, chatHistory, userProfile.chatMode || 'chat');
+  const finalMaxTokens = maxTokens || dynamicLimits.maxTokens;
+  const finalTimeout = timeoutMinutes || dynamicLimits.timeoutMinutes;
 
   const systemPrompt = `Bạn là một NPC trong show hẹn hò "Sách Thế Giới".
   Hồ sơ của bạn: Tên: ${npc.name}, Tuổi: ${npc.age}, Giới tính: ${npc.gender}, MBTI: ${npc.mbti}, Tính cách: ${npc.personality}, Sở thích: ${npc.hobbies?.join(', ') || 'Không có'}.
@@ -290,7 +311,7 @@ export async function generateNPCResponse(npc: any, userMessage: string, chatHis
       length: `${min}-${max} chars`, 
       ooc: 'Không' 
     },
-    { mode: isNovel ? 'novel' : 'online', minChars: min, maxChars: max }
+    { mode: isNovel ? 'novel' : 'online', minChars: min, maxChars: max, maxTokens: finalMaxTokens, timeoutMinutes: finalTimeout }
   );
   return response;
 }

@@ -16,12 +16,25 @@ import {
   Menu,
   ArrowLeft,
   Type,
-  Heart
+  Heart,
+  Rabbit,
+  MessageSquare,
+  Users
 } from 'lucide-react';
 
 interface Chapter {
   id: string;
   title: string;
+  content: string;
+  timestamp: string;
+}
+
+interface NPCComment {
+  id: string;
+  npcName: string;
+  npcAvatar: string;
+  npcRole: string;
+  npcBackground: string;
   content: string;
   timestamp: string;
 }
@@ -35,13 +48,18 @@ interface Novel {
   chapters: Chapter[];
   coverImage: string;
   editorBackgroundImage: string;
+  npcGlobalBackground: string;
   lastModified: number;
   settings: {
     proxyEndpoint: string;
     proxyKey: string;
     model: string;
     isSetupComplete: boolean;
+    useStreaming?: boolean;
+    extremeCapacityMode?: boolean;
   };
+  userPlot?: string;
+  nextChapterLength?: number | '';
 }
 
 interface NovelScreenProps {
@@ -51,8 +69,13 @@ interface NovelScreenProps {
 const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   // Library State
   const [novels, setNovels] = useState<Novel[]>(() => {
-    const saved = localStorage.getItem('novel_library_v3');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('novel_library_v3');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error('Failed to parse novels from localStorage', e);
+      return [];
+    }
   });
   const [currentNovelId, setCurrentNovelId] = useState<string | null>(null);
   
@@ -61,6 +84,12 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const [showDrawer, setShowDrawer] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -69,17 +98,72 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const [userPlot, setUserPlot] = useState('');
   const [nextChapterLength, setNextChapterLength] = useState<number | ''>('');
   const [showPlotPrompt, setShowPlotPrompt] = useState(false);
+  const [showGossipGroup, setShowGossipGroup] = useState(false);
+  const [isGeneratingGossip, setIsGeneratingGossip] = useState(false);
+  const [npcComments, setNpcComments] = useState<NPCComment[]>([]);
   
   const coverInputRef = useRef<HTMLInputElement>(null);
   const editorBgInputRef = useRef<HTMLInputElement>(null);
+  const npcBgInputRef = useRef<HTMLInputElement>(null);
+  const novelAbortControllerRef = useRef<AbortController | null>(null);
+  const gossipAbortControllerRef = useRef<AbortController | null>(null);
 
   // Current Novel State (Derived)
   const currentNovel = novels.find(n => n.id === currentNovelId);
 
   // Persistence
   useEffect(() => {
-    localStorage.setItem('novel_library_v3', JSON.stringify(novels));
+    try {
+      localStorage.setItem('novel_library_v3', JSON.stringify(novels));
+    } catch (e) {
+      console.error('Failed to save novels to localStorage', e);
+      setError('Không thể lưu dữ liệu. Có thể do bộ nhớ trình duyệt đã đầy (thường do ảnh quá lớn hoặc quá nhiều chương). Hãy thử xóa bớt ảnh nền hoặc các chương cũ.');
+    }
   }, [novels]);
+
+  // Auto-clear toasts
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(null), 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
+
+  // Reset editor state when switching novels
+  useEffect(() => {
+    // Always clear content and editing ID when switching
+    setContent('');
+    setEditingChapterId(null);
+    setNpcComments([]);
+
+    if (currentNovelId) {
+      const novel = novels.find(n => n.id === currentNovelId);
+      if (novel) {
+        setUserPlot(novel.userPlot || '');
+        setNextChapterLength(novel.nextChapterLength ?? '');
+      }
+    } else {
+      setUserPlot('');
+      setNextChapterLength('');
+    }
+  }, [currentNovelId]);
+
+  // Persist plot and length changes immediately
+  useEffect(() => {
+    if (currentNovelId) {
+      const novel = novels.find(n => n.id === currentNovelId);
+      if (novel && (novel.userPlot !== userPlot || novel.nextChapterLength !== nextChapterLength)) {
+        updateCurrentNovel({ userPlot, nextChapterLength });
+      }
+    }
+  }, [userPlot, nextChapterLength, currentNovelId]);
 
   // Fetch Models
   const fetchModels = async () => {
@@ -87,6 +171,9 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
     const { proxyEndpoint, proxyKey } = currentNovel.settings;
     if (!proxyEndpoint || !proxyKey) return;
     
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
     try {
       setError(null);
       let url = proxyEndpoint.trim();
@@ -100,20 +187,28 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
       const response = await fetch(modelsUrl, {
         method: 'GET',
+        signal: controller.signal,
         headers: {
           'Authorization': `Bearer ${proxyKey}`,
           'Accept': 'application/json'
         }
       });
       
+      clearTimeout(timeoutId);
+      
       if (!response.ok) throw new Error('Không thể tải danh sách model.');
       const data = await response.json();
       const rawModels = data.data || data.models || [];
       const modelIds = rawModels.map((m: any) => (typeof m === 'string' ? m : m.id));
       setAvailableModels(modelIds);
-    } catch (err) {
+    } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('Error fetching models:', err);
-      setError('Lỗi kết nối API.');
+      if (err.name === 'AbortError') {
+        setError('Lỗi: Kết nối quá hạn khi tải danh sách model.');
+      } else {
+        setError('Lỗi kết nối API.');
+      }
     }
   };
 
@@ -128,12 +223,15 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
       chapters: [],
       coverImage: '',
       editorBackgroundImage: '',
+      npcGlobalBackground: '',
       lastModified: Date.now(),
       settings: {
         proxyEndpoint: '',
         proxyKey: '',
         model: '',
-        isSetupComplete: false
+        isSetupComplete: false,
+        useStreaming: true,
+        extremeCapacityMode: false
       }
     };
     setNovels([newNovel, ...novels]);
@@ -185,7 +283,38 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
   const handleGenerate = async () => {
     if (!currentNovel) return;
-    const { proxyEndpoint, proxyKey, model } = currentNovel.settings;
+
+    // Check for unsaved changes before generating new content
+    if (content.trim()) {
+      let isUnsaved = false;
+      if (editingChapterId) {
+        const savedChapter = currentNovel.chapters.find(c => c.id === editingChapterId);
+        if (savedChapter && savedChapter.content !== content) {
+          isUnsaved = true;
+        }
+      } else {
+        isUnsaved = true;
+      }
+      
+      if (isUnsaved) {
+        setConfirmConfig({
+          title: 'Nội dung chưa lưu',
+          message: 'Bạn có nội dung chưa lưu. Nếu tiếp tục sáng tác chương mới, nội dung hiện tại sẽ bị ghi đè. Bạn có muốn tiếp tục?',
+          onConfirm: () => {
+            setConfirmConfig(null);
+            proceedWithGeneration();
+          }
+        });
+        return;
+      }
+    }
+
+    proceedWithGeneration();
+  };
+
+  const proceedWithGeneration = async () => {
+    if (!currentNovel) return;
+    const { proxyEndpoint, proxyKey, model, useStreaming = true, extremeCapacityMode = false } = currentNovel.settings;
     if (!proxyEndpoint || !proxyKey || !model) {
       setError('Vui lòng hoàn tất cài đặt API.');
       setShowSettings(true);
@@ -195,11 +324,20 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
     setIsGenerating(true);
     setError(null);
+    
+    // NÂNG CẤP SỨC CHỨA: Tăng thời gian chờ lên tối đa 60 phút nếu bật Extreme Mode
+    novelAbortControllerRef.current = new AbortController();
+    const timeoutDuration = extremeCapacityMode ? 60 * 60 * 1000 : 15 * 60 * 1000;
+    const timeoutId = setTimeout(() => {
+      if (novelAbortControllerRef.current) {
+        novelAbortControllerRef.current.abort('TIMEOUT');
+      }
+    }, timeoutDuration);
 
     try {
       // Lấy bối cảnh rộng hơn từ các chương trước (tối đa 5 chương gần nhất)
       const context = currentNovel.chapters.slice(-5).map(ch => 
-        `Chương ${ch.title}: ${ch.content.substring(0, 1000)}...`
+        `Chương ${ch.title}: ${(ch.content || '').substring(0, 500)}...`
       ).join('\n\n');
 
       const systemInstruction = `Bạn là một nhà văn chuyên nghiệp tài ba, có khả năng viết lách xuất sắc và tư duy cốt truyện logic.
@@ -208,7 +346,8 @@ QUY TẮC BẮT BUỘC:
 2. KHÔNG ĐƯỢC viết ngắt quãng. Phải hoàn thành toàn bộ chương truyện trong một lần trả lời duy nhất.
 3. KHÔNG ĐƯỢC tự ý cắt câu hay kết thúc lửng lơ khi chưa đạt đủ dung lượng yêu cầu.
 4. PHẢI ghi nhớ và liên kết chặt chẽ với các chương trước. Phát triển cốt truyện tiếp nối, không nhắc lại những gì đã xảy ra một cách thừa thãi.
-5. Văn phong phải mượt mà, giàu hình ảnh, cảm xúc và phù hợp với thể loại truyện.`;
+5. Văn phong phải mượt mà, giàu hình ảnh, cảm xúc và phù hợp với thể loại truyện.
+6. NẾU TÁC GIẢ CÓ YÊU CẦU CỐT TRUYỆN (PLOT), BẠN PHẢI TUÂN THỦ TUYỆT ĐỐI VÀ LẤY ĐÓ LÀM XƯƠNG SỐNG CHO CHƯƠNG NÀY.`;
 
       const userPrompt = `Hãy viết chương tiếp theo cho tiểu thuyết "${currentNovel.storyName}".
 THÔNG TIN TRUYỆN:
@@ -216,9 +355,9 @@ THÔNG TIN TRUYỆN:
 - Nhân vật chính: ${currentNovel.characterName}
 - Độ dài yêu cầu: Khoảng ${nextChapterLength || currentNovel.chapterLength} chữ/từ.
 
-${userPlot ? `YÊU CẦU CỐT TRUYỆN RIÊNG TỪ TÁC GIẢ (ƯU TIÊN):
-${userPlot}
-Hãy triển khai chương này dựa trên ý tưởng trên của tác giả.` : ''}
+${userPlot ? `[QUAN TRỌNG NHẤT] YÊU CẦU CỐT TRUYỆN TỪ TÁC GIẢ:
+"${userPlot}"
+=> BẮT BUỘC PHẢI VIẾT CHƯƠNG NÀY THEO ĐÚNG DIỄN BIẾN VÀ Ý TƯỞNG TRÊN. Không được đi chệch hướng.` : ''}
 
 BỐI CẢNH CÁC CHƯƠNG TRƯỚC:
 ${context || 'Đây là chương đầu tiên, hãy bắt đầu một cách ấn tượng.'}
@@ -228,7 +367,7 @@ YÊU CẦU NỘI DUNG:
 - Đảm bảo sự liên kết logic với bối cảnh đã cho.
 - Tập trung vào diễn biến tâm lý và hành động của nhân vật ${currentNovel.characterName}.
 - KHÔNG nhắc lại nội dung cũ, hãy triển khai tình tiết mới.
-- PHẢI VIẾT ĐỦ ĐỘ DÀI YÊU CẦU (${nextChapterLength || currentNovel.chapterLength} chữ/từ), không được dừng lại cho đến khi đủ dung lượng.`;
+- PHẢI VIẾT ĐỦ ĐỘ DÀI YÊU CẦU (${nextChapterLength || currentNovel.chapterLength} chữ/từ), TUYỆT ĐỐI KHÔNG DỪNG LẠI CHO ĐẾN KHI ĐỦ DUNG LƯỢNG.`;
 
       let apiUrl = proxyEndpoint.trim();
       if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
@@ -242,6 +381,233 @@ YÊU CẦU NỘI DUNG:
 
       const response = await fetch(completionUrl, {
         method: 'POST',
+        signal: novelAbortControllerRef.current.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${proxyKey}`,
+          ...(useStreaming ? { 'Accept': 'text/event-stream' } : {})
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature: 0.7,
+          stream: useStreaming,
+          // NÂNG CẤP SỨC CHỨA: Cho phép nhận tối đa 100.000 tokens nếu bật Extreme Mode
+          max_tokens: extremeCapacityMode ? 100000 : 32000 
+        })
+      });
+
+      if (response.status === 504) {
+        throw new Error('Lỗi 504: Cổng kết nối hết hạn (Gateway Timeout). API Proxy hoặc Model đang quá tải hoặc phản hồi quá chậm. Hãy thử lại hoặc chọn Model khác nhanh hơn.');
+      }
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `API request failed with status ${response.status}`);
+      }
+
+      if (useStreaming) {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let generatedContent = '';
+        let buffer = '';
+        
+        if (!reader) {
+          throw new Error('Response body is not readable. Proxy của bạn có thể không hỗ trợ Streaming.');
+        }
+
+        setContent('');
+        setActiveTab('editor');
+        setEditingChapterId(null);
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          
+          // Giữ lại phần chưa hoàn chỉnh trong buffer
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith('data: ') && trimmedLine !== 'data: [DONE]') {
+              try {
+                const data = JSON.parse(trimmedLine.slice(6));
+                if (data.choices?.[0]?.delta?.content) {
+                  generatedContent += data.choices[0].delta.content;
+                  setContent(generatedContent);
+                }
+              } catch (e) {
+                // Bỏ qua lỗi parse JSON vì có thể chunk bị cắt ngang
+              }
+            }
+          }
+        }
+        
+        if (!generatedContent.trim()) {
+           throw new Error('Streaming hoàn tất nhưng không nhận được nội dung. Hãy thử tắt chế độ Streaming trong Cài đặt.');
+        }
+      } else {
+        // NÂNG CẤP SỨC CHỨA: Đọc dữ liệu thô (raw text) theo từng chunk để tránh tràn bộ nhớ RAM 
+        // của trình duyệt khi nhận cục JSON khổng lồ (thay vì dùng response.json() trực tiếp)
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let rawJsonText = '';
+
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            rawJsonText += decoder.decode(value, { stream: true });
+          }
+        } else {
+          rawJsonText = await response.text();
+        }
+
+        let data;
+        try {
+          data = JSON.parse(rawJsonText);
+        } catch (parseError) {
+          console.error("JSON Parse Error:", parseError);
+          console.log("Raw Text:", rawJsonText.substring(0, 1000) + "...");
+          throw new Error('Hệ thống đã tải xong khối dữ liệu khổng lồ nhưng định dạng trả về bị hỏng (Invalid JSON). Dữ liệu quá lớn có thể đã bị cắt ngang giữa chừng.');
+        }
+        
+        if (data.error) {
+          throw new Error(data.error.message || 'API Error');
+        }
+        
+        // Handle different API response formats (Chat vs Completions vs Gemini vs Anthropic)
+        let generatedContent = '';
+        if (data.choices?.[0]?.message?.content !== undefined) {
+          generatedContent = data.choices[0].message.content;
+        } else if (data.choices?.[0]?.text !== undefined) {
+          generatedContent = data.choices[0].text;
+        } else if (data.candidates?.[0]?.content?.parts?.[0]?.text !== undefined) {
+          generatedContent = data.candidates[0].content.parts[0].text; // Gemini
+        } else if (Array.isArray(data.content) && data.content[0]?.text !== undefined) {
+          generatedContent = data.content[0].text; // Anthropic
+        } else if (typeof data.content === 'string') {
+          generatedContent = data.content;
+        } else if (data.response !== undefined) {
+          generatedContent = data.response; // Ollama generate endpoint
+        } else if (data.message?.content !== undefined) {
+          generatedContent = data.message.content; // Some custom proxies
+        } else if (data.text !== undefined) {
+          generatedContent = data.text; // Other custom proxies
+        }
+        
+        if (!generatedContent || !generatedContent.trim()) {
+          console.error('Full API Response:', data);
+          
+          // NÂNG CẤP: Bỏ thông báo đổ lỗi cho Proxy, hiển thị thông báo trung lập hơn
+          if (data.usage?.completion_tokens > 0 && generatedContent === "") {
+            setError(`Hệ thống App đã nâng cấp sức chứa và nhận thành công toàn bộ gói dữ liệu từ API. Tuy nhiên, gói dữ liệu trả về báo cáo có ${data.usage.completion_tokens} tokens nhưng phần nội dung văn bản (content) lại hoàn toàn trống rỗng. Dưới đây là dữ liệu gốc (Raw Context) để bạn kiểm tra.`);
+          } else {
+            setError('Đã hiển thị dữ liệu gốc (Raw Context) vì không nhận diện được định dạng trả về của Model.');
+          }
+
+          // FORCE DISPLAY RAW CONTEXT
+          generatedContent = `[HỆ THỐNG ĐÃ NÂNG CẤP SỨC CHỨA - DỮ LIỆU GỐC TỪ API]\n\n${JSON.stringify(data, null, 2)}`;
+        }
+        
+        setContent(generatedContent);
+        setEditingChapterId(null);
+        setActiveTab('editor');
+      }
+      // Không reset plot và độ dài để người dùng có thể chỉnh sửa lại nếu cần
+    } catch (err: any) {
+      if (err.name === 'AbortError' || err === 'TIMEOUT') {
+        setError(err === 'TIMEOUT' ? 'Đã quá 15 phút chờ đợi. Kết nối bị ngắt để tránh treo máy.' : 'Đã hủy quá trình sáng tác.');
+      } else {
+        console.error(err);
+        setError(err.message || 'Lỗi khi tạo nội dung. Vui lòng thử lại.');
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      setIsGenerating(false);
+      novelAbortControllerRef.current = null;
+    }
+  };
+
+  const cancelGeneration = () => {
+    if (novelAbortControllerRef.current) {
+      novelAbortControllerRef.current.abort();
+    }
+  };
+
+  const handleSave = () => {
+    if (!currentNovel || !(content || '').trim()) return;
+    
+    if (editingChapterId) {
+      const updatedChapters = currentNovel.chapters.map(ch => 
+        ch.id === editingChapterId ? { ...ch, content: content || '' } : ch
+      );
+      updateCurrentNovel({ 
+        chapters: updatedChapters,
+        userPlot,
+        nextChapterLength
+      });
+    } else {
+      const newChapterId = Date.now().toString();
+      const newChapter: Chapter = {
+        id: newChapterId,
+        title: (currentNovel.chapters.length + 1).toString(),
+        content: content || '',
+        timestamp: new Date().toLocaleString()
+      };
+      updateCurrentNovel({ 
+        chapters: [...currentNovel.chapters, newChapter],
+        userPlot,
+        nextChapterLength
+      });
+      setEditingChapterId(newChapterId); // Giữ chương vừa lưu ở trạng thái đang sửa
+    }
+    
+    setSuccessMessage('Đã lưu chương thành công!');
+    // Không setContent('') để người dùng vẫn thấy nội dung vừa lưu
+  };
+
+  const handleGenerateGossip = async () => {
+    if (!currentNovel || !content.trim()) return;
+    const { proxyEndpoint, proxyKey, model } = currentNovel.settings;
+    if (!proxyEndpoint || !proxyKey || !model) return;
+
+    setIsGeneratingGossip(true);
+    gossipAbortControllerRef.current = new AbortController();
+
+    try {
+      const systemInstruction = `Bạn là một nhóm 300 NPC (độc giả ảo) đang theo dõi câu chuyện "${currentNovel.storyName}".
+Nhiệm vụ: Hãy tạo ra một cuộc hội thoại sôi nổi, cãi nhau, khen ngợi, bình luận về nội dung chương truyện vừa đọc.
+YÊU CẦU:
+1. Tạo ra khoảng 30-50 bình luận từ các NPC khác nhau (mô phỏng hội nhóm 300+ người).
+2. Mỗi bình luận phải có: Tên NPC, Vai trò (ví dụ: Fan cuồng, Kẻ soi mói, Người qua đường...), và Nội dung bình luận.
+3. Nội dung phải đa dạng: cãi nhau về tình tiết, khen nhân vật ${currentNovel.characterName}, chê tác giả viết chậm, dự đoán tương lai...
+4. Trả về định dạng JSON: { "comments": [ { "npcName": "...", "npcRole": "...", "content": "..." }, ... ] }`;
+
+      const userPrompt = `Nội dung chương truyện vừa xong:
+${content.substring(0, 3000)}
+
+Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán!`;
+
+      let apiUrl = proxyEndpoint.trim();
+      if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
+      if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
+      
+      const completionUrl = apiUrl.endsWith('/chat/completions') 
+        ? apiUrl 
+        : apiUrl.endsWith('/v1') 
+          ? `${apiUrl}/chat/completions`
+          : `${apiUrl}/v1/chat/completions`;
+
+      const response = await fetch(completionUrl, {
+        method: 'POST',
+        signal: gossipAbortControllerRef.current.signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${proxyKey}`
@@ -252,54 +618,92 @@ YÊU CẦU NỘI DUNG:
             { role: 'system', content: systemInstruction },
             { role: 'user', content: userPrompt }
           ],
-          temperature: 0.7,
-          max_tokens: Math.max(3000, (nextChapterLength || currentNovel.chapterLength) * 3) // Tăng max_tokens để đảm bảo đủ độ dài
+          temperature: 0.9
         })
       });
 
-      if (!response.ok) throw new Error('API request failed');
+      if (response.status === 504) {
+        throw new Error('Lỗi 504: Cổng kết nối hết hạn (Gateway Timeout). Hội nhóm NPC đang quá tải hoặc phản hồi chậm. Hãy thử lại.');
+      }
+
+      if (!response.ok) throw new Error(`Gossip API failed with status ${response.status}`);
       const data = await response.json();
-      const generatedContent = data.choices[0].message.content;
-      setContent(generatedContent);
-      setEditingChapterId(null);
-      setActiveTab('editor');
-      setShowPlotPrompt(true); 
-      // Reset plot và độ dài sau khi tạo xong chương mới
-      setUserPlot('');
-      setNextChapterLength('');
-    } catch (err) {
-      console.error(err);
-      setError('Lỗi khi tạo nội dung.');
+      
+      let rawContent = '';
+      if (data.choices?.[0]?.message?.content) {
+        rawContent = data.choices[0].message.content;
+      } else if (data.choices?.[0]?.text) {
+        rawContent = data.choices[0].text;
+      } else if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        rawContent = data.candidates[0].content.parts[0].text; // Gemini
+      } else if (Array.isArray(data.content) && data.content[0]?.text) {
+        rawContent = data.content[0].text; // Anthropic
+      } else if (typeof data.content === 'string') {
+        rawContent = data.content;
+      } else if (data.response) {
+        rawContent = data.response; // Ollama generate endpoint
+      } else if (data.message?.content) {
+        rawContent = data.message.content;
+      } else if (data.text) {
+        rawContent = data.text;
+      }
+      
+      if (!rawContent || !rawContent.trim()) {
+        console.error('Full Gossip API Response:', data);
+        // Force raw context for gossip too
+        rawContent = JSON.stringify(data);
+      }
+
+      rawContent = rawContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      
+      let result;
+      try {
+        result = JSON.parse(rawContent);
+      } catch (e) {
+        const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            result = JSON.parse(jsonMatch[0]);
+          } catch (e2) {
+            throw new Error('Phản hồi từ NPC không đúng định dạng. Hãy thử lại.');
+          }
+        } else {
+          throw new Error('Không thể đọc được phản hồi từ NPC. Hãy thử lại.');
+        }
+      }
+      
+      const newComments: NPCComment[] = (result.comments || []).map((c: any) => ({
+        id: Math.random().toString(36).substr(2, 9),
+        npcName: c.npcName,
+        npcAvatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${c.npcName}`,
+        npcRole: c.npcRole,
+        npcBackground: currentNovel.npcGlobalBackground || '',
+        content: c.content,
+        timestamp: new Date().toLocaleTimeString()
+      }));
+
+      setNpcComments(newComments);
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setError('Đã hủy kết nối hội nhóm NPC.');
+      } else {
+        console.error(err);
+        setError(err.message || 'Không thể kết nối với hội nhóm lắm chuyện.');
+      }
     } finally {
-      setIsGenerating(false);
+      setIsGeneratingGossip(false);
+      gossipAbortControllerRef.current = null;
     }
   };
 
-  const handleSave = () => {
-    if (!currentNovel || !content.trim()) return;
-    
-    if (editingChapterId) {
-      const updatedChapters = currentNovel.chapters.map(ch => 
-        ch.id === editingChapterId ? { ...ch, content } : ch
-      );
-      updateCurrentNovel({ chapters: updatedChapters });
-    } else {
-      const newChapter: Chapter = {
-        id: Date.now().toString(),
-        title: (currentNovel.chapters.length + 1).toString(),
-        content,
-        timestamp: new Date().toLocaleString()
-      };
-      updateCurrentNovel({ chapters: [...currentNovel.chapters, newChapter] });
+  const cancelGossipGeneration = () => {
+    if (gossipAbortControllerRef.current) {
+      gossipAbortControllerRef.current.abort();
     }
-    
-    alert('Đã lưu chương thành công!');
-    setContent('');
-    setEditingChapterId(null);
   };
 
   // Library View
-  if (!currentNovelId) {
+  if (!currentNovelId || !currentNovel) {
     return (
       <motion.div 
         initial={{ opacity: 0 }}
@@ -477,12 +881,38 @@ YÊU CẦU NỘI DUNG:
                           <button onClick={fetchModels} className="px-6 py-3 bg-[#BE185D] text-white rounded-xl font-bold hover:bg-[#9D174D] transition-colors shadow-lg">Tải Model</button>
                         </div>
                       </div>
+                      <div className="flex items-center gap-3 p-4 bg-pink-50 rounded-xl border border-pink-100">
+                        <input 
+                          type="checkbox" 
+                          id="useStreaming" 
+                          checked={currentNovel.settings.useStreaming !== false} 
+                          onChange={(e) => updateSettings({ useStreaming: e.target.checked })}
+                          className="w-5 h-5 text-[#DB2777] rounded focus:ring-[#BE185D]"
+                        />
+                        <label htmlFor="useStreaming" className="text-sm font-medium text-stone-700 cursor-pointer">
+                          Bật chế độ Streaming (Viết theo thời gian thực)
+                          <p className="text-xs text-stone-500 font-normal mt-1">Khuyên dùng để tránh lỗi Proxy làm mất chữ khi viết chương dài (&gt; 5000 tokens).</p>
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-3 p-4 bg-purple-50 rounded-xl border border-purple-100">
+                        <input 
+                          type="checkbox" 
+                          id="extremeCapacityMode" 
+                          checked={currentNovel.settings.extremeCapacityMode || false} 
+                          onChange={(e) => updateSettings({ extremeCapacityMode: e.target.checked })}
+                          className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500"
+                        />
+                        <label htmlFor="extremeCapacityMode" className="text-sm font-medium text-stone-700 cursor-pointer">
+                          Bật chế độ Siêu Sức Chứa (Extreme Capacity - 100.000+ Tokens)
+                          <p className="text-xs text-stone-500 font-normal mt-1">Cho phép nhận văn bản cực lớn trong 1 lần trả lời. Thời gian chờ tối đa lên đến 60 phút.</p>
+                        </label>
+                      </div>
                       <button onClick={() => {
                         if (currentNovel.settings.proxyEndpoint && currentNovel.settings.proxyKey && currentNovel.settings.model) {
                           updateSettings({ isSetupComplete: true });
-                          alert('Đã lưu cấu hình!');
+                          setSuccessMessage('Đã lưu cấu hình!');
                         } else {
-                          alert('Vui lòng hoàn tất cài đặt.');
+                          setError('Vui lòng hoàn tất cài đặt.');
                         }
                       }} className="w-full p-3 bg-[#DB2777] text-white rounded-xl font-bold hover:bg-[#BE185D] transition-all shadow-lg">Lưu thiết lập</button>
                     </div>
@@ -528,6 +958,25 @@ YÊU CẦU NỘI DUNG:
                             <>
                               <Plus size={24} className="text-stone-300 mb-2" />
                               <span className="text-[10px] font-bold text-stone-400">Chọn ảnh nền</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        <label className="block text-xs font-semibold text-stone-500 uppercase ml-1">Nền hội nhóm NPC</label>
+                        <div 
+                          onClick={() => npcBgInputRef.current?.click()}
+                          className="aspect-[3/4] rounded-2xl border-2 border-dashed border-stone-200 hover:border-[#DB2777] transition-all cursor-pointer flex flex-col items-center justify-center bg-stone-50 overflow-hidden relative group"
+                        >
+                          {currentNovel.npcGlobalBackground ? (
+                            <>
+                              <img src={currentNovel.npcGlobalBackground} alt="NPC BG" className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold text-center p-2">Thay đổi</div>
+                            </>
+                          ) : (
+                            <>
+                              <Plus size={24} className="text-stone-300 mb-2" />
+                              <span className="text-[10px] font-bold text-stone-400">Chọn nền NPC</span>
                             </>
                           )}
                         </div>
@@ -640,7 +1089,7 @@ YÊU CẦU NỘI DUNG:
                           <button 
                             onClick={() => {
                               navigator.clipboard.writeText(content);
-                              alert('Đã sao chép!');
+                              setSuccessMessage('Đã sao chép vào bộ nhớ tạm!');
                             }}
                             className="p-3 text-stone-400 hover:text-stone-600 hover:bg-stone-50 rounded-full transition-all"
                             title="Sao chép"
@@ -661,13 +1110,19 @@ YÊU CẦU NỘI DUNG:
                     {isGenerating && (
                       <div className={`absolute inset-0 z-10 bg-white/60 backdrop-blur-[2px] flex flex-col items-center justify-center ${isFocusMode ? '' : ''}`}>
                         <div className="w-12 h-12 border-4 border-[#DB2777]/20 border-t-[#DB2777] rounded-full animate-spin mb-4" />
-                        <p className="text-[#DB2777] font-bold animate-pulse">AI đang mài giũa từng câu chữ...</p>
+                        <p className="text-[#DB2777] font-bold animate-pulse mb-4">AI đang mài giũa từng câu chữ...</p>
+                        <button 
+                          onClick={cancelGeneration}
+                          className="px-6 py-2 bg-white text-stone-500 hover:text-red-500 hover:bg-red-50 rounded-full font-bold shadow-sm border border-stone-200 transition-all"
+                        >
+                          Hủy
+                        </button>
                       </div>
                     )}
 
                     <div className={`flex-1 flex flex-col ${isFocusMode ? 'max-w-5xl mx-auto w-full' : ''}`}>
                       <textarea 
-                        value={content} 
+                        value={content || ''} 
                         onChange={(e) => setContent(e.target.value)}
                         className="flex-1 w-full bg-transparent text-stone-700 font-serif leading-[2.2] focus:outline-none resize-none custom-scrollbar"
                         placeholder="Nội dung chương truyện sẽ hiện ra ở đây..."
@@ -680,15 +1135,16 @@ YÊU CẦU NỘI DUNG:
                     
                     <div className={`mt-8 pt-6 border-t border-stone-200/50 flex justify-between items-center text-stone-400 italic text-sm ${isFocusMode ? 'max-w-5xl mx-auto w-full' : ''}`}>
                       <div className="flex gap-6">
-                        <span>{content.split(/\s+/).filter(Boolean).length} từ</span>
-                        <span>{content.length} ký tự</span>
+                        <span>{(content || '').split(/\s+/).filter(Boolean).length} từ</span>
+                        <span>{(content || '').length} ký tự</span>
                       </div>
                       <div className="flex gap-4">
                         <button 
                           onClick={handleGenerate}
-                          className="text-[#DB2777] hover:underline font-bold flex items-center gap-1"
+                          disabled={isGenerating}
+                          className={`text-[#DB2777] font-bold flex items-center gap-1 ${isGenerating ? 'opacity-50 cursor-not-allowed' : 'hover:underline'}`}
                         >
-                          <Sparkles size={16} /> Viết tiếp...
+                          <Sparkles size={16} /> {isGenerating ? 'Đang viết...' : 'Viết tiếp...'}
                         </button>
                       </div>
                     </div>
@@ -721,7 +1177,46 @@ YÊU CẦU NỘI DUNG:
                 <h3 className="text-xl font-bold text-stone-800 flex items-center">
                   <Menu className="mr-2 text-[#DB2777]" size={24} /> Mục lục
                 </h3>
-                <button onClick={() => setShowDrawer(false)} className="text-stone-400 hover:text-stone-600"><X size={24} /></button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      let isUnsaved = false;
+                      if (content.trim()) {
+                        if (editingChapterId) {
+                          const savedChapter = currentNovel.chapters.find(c => c.id === editingChapterId);
+                          if (savedChapter && savedChapter.content !== content) {
+                            isUnsaved = true;
+                          }
+                        } else {
+                          isUnsaved = true;
+                        }
+                      }
+                      
+                      if (isUnsaved) {
+                        setConfirmConfig({
+                          title: 'Nội dung chưa lưu',
+                          message: 'Nội dung hiện tại chưa lưu sẽ bị mất. Bạn có muốn tiếp tục?',
+                          onConfirm: () => {
+                            setConfirmConfig(null);
+                            setEditingChapterId(null);
+                            setContent('');
+                            setShowDrawer(false);
+                          }
+                        });
+                        return;
+                      }
+                      
+                      setEditingChapterId(null);
+                      setContent('');
+                      setShowDrawer(false);
+                    }}
+                    className="p-2 text-[#DB2777] hover:bg-pink-50 rounded-full transition-colors"
+                    title="Chương mới"
+                  >
+                    <Plus size={24} />
+                  </button>
+                  <button onClick={() => setShowDrawer(false)} className="text-stone-400 hover:text-stone-600"><X size={24} /></button>
+                </div>
               </div>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
@@ -737,7 +1232,32 @@ YÊU CẦU NỘI DUNG:
                             <div 
                               className="flex-1"
                               onClick={() => {
-                                if (content.trim() && !window.confirm('Nội dung hiện tại chưa lưu sẽ bị mất. Bạn có muốn tiếp tục?')) return;
+                                let isUnsaved = false;
+                                if (content.trim()) {
+                                  if (editingChapterId) {
+                                    const savedChapter = currentNovel.chapters.find(c => c.id === editingChapterId);
+                                    if (savedChapter && savedChapter.content !== content) {
+                                      isUnsaved = true;
+                                    }
+                                  } else {
+                                    isUnsaved = true;
+                                  }
+                                }
+                                
+                                if (isUnsaved) {
+                                  setConfirmConfig({
+                                    title: 'Nội dung chưa lưu',
+                                    message: 'Nội dung hiện tại chưa lưu sẽ bị mất. Bạn có muốn tiếp tục?',
+                                    onConfirm: () => {
+                                      setConfirmConfig(null);
+                                      setEditingChapterId(chapter.id);
+                                      setContent(chapter.content);
+                                      setShowDrawer(false);
+                                    }
+                                  });
+                                  return;
+                                }
+                                
                                 setEditingChapterId(chapter.id);
                                 setContent(chapter.content);
                                 setShowDrawer(false);
@@ -746,7 +1266,7 @@ YÊU CẦU NỘI DUNG:
                               <h4 className={`font-bold ${editingChapterId === chapter.id ? 'text-[#DB2777]' : 'text-stone-700'}`}>
                                 Chương {chapter.title}
                               </h4>
-                              <p className="text-xs text-stone-400 line-clamp-1">{chapter.content.substring(0, 50)}</p>
+                              <p className="text-xs text-stone-400 line-clamp-1">{(chapter.content || '').substring(0, 50)}</p>
                             </div>
                             <div className="flex gap-1">
                               <button 
@@ -759,14 +1279,19 @@ YÊU CẦU NỘI DUNG:
                               <button 
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (window.confirm('Xóa chương này?')) {
-                                    const updatedChapters = currentNovel.chapters.filter(ch => ch.id !== chapter.id);
-                                    updateCurrentNovel({ chapters: updatedChapters });
-                                    if (editingChapterId === chapter.id) {
-                                      setEditingChapterId(null);
-                                      setContent('');
+                                  setConfirmConfig({
+                                    title: 'Xóa chương',
+                                    message: 'Bạn có chắc chắn muốn xóa chương này không?',
+                                    onConfirm: () => {
+                                      setConfirmConfig(null);
+                                      const updatedChapters = currentNovel.chapters.filter(ch => ch.id !== chapter.id);
+                                      updateCurrentNovel({ chapters: updatedChapters });
+                                      if (editingChapterId === chapter.id) {
+                                        setEditingChapterId(null);
+                                        setContent('');
+                                      }
                                     }
-                                  }
+                                  });
                                 }}
                                 className="p-2 text-stone-300 hover:text-red-500 transition-all"
                               >
@@ -918,19 +1443,200 @@ YÊU CẦU NỘI DUNG:
 
       {/* Reopen Plot Prompt Toggle (Heart Icon) */}
       {!showPlotPrompt && currentNovelId && activeTab === 'editor' && (
-        <motion.button
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          onClick={() => setShowPlotPrompt(true)}
-          className="fixed bottom-8 left-8 z-[150] p-2 bg-white text-[#DB2777] rounded-full shadow-lg border border-pink-50 hover:scale-110 transition-transform group"
-          title="Gợi ý Plot cho chương sau"
-        >
-          <Heart size={16} className={userPlot ? "fill-[#DB2777]" : ""} />
-          {userPlot && (
-            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white" />
-          )}
-        </motion.button>
+        <div className="fixed bottom-8 left-8 z-[150] flex flex-col gap-3">
+          <motion.button
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            onClick={() => setShowPlotPrompt(true)}
+            className="p-2 bg-white text-[#DB2777] rounded-full shadow-lg border border-pink-50 hover:scale-110 transition-transform group relative"
+            title="Gợi ý Plot cho chương sau"
+          >
+            <Heart size={16} className={userPlot ? "fill-[#DB2777]" : ""} />
+            {userPlot && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white" />
+            )}
+          </motion.button>
+
+          <motion.button
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            onClick={() => {
+              setShowGossipGroup(true);
+              if (npcComments.length === 0) handleGenerateGossip();
+            }}
+            className="p-2 bg-white text-[#BE185D] rounded-full shadow-lg border border-pink-50 hover:scale-110 transition-transform group"
+            title="Hội nhóm lắm chuyện"
+          >
+            <Rabbit size={16} />
+          </motion.button>
+        </div>
       )}
+
+      {/* Gossip Group Modal */}
+      <AnimatePresence>
+        {showGossipGroup && (
+          <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowGossipGroup(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-2xl h-[80vh] bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col border border-pink-100"
+              style={{
+                backgroundImage: currentNovel?.npcGlobalBackground ? `url(${currentNovel.npcGlobalBackground})` : 'none',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center'
+              }}
+            >
+              <div className={`p-6 flex justify-between items-center border-b border-pink-100 ${currentNovel?.npcGlobalBackground ? 'bg-white/80 backdrop-blur-md' : 'bg-white'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-pink-50 text-[#DB2777] rounded-2xl">
+                    <Users size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-stone-800">Hội Nhóm Lắm Chuyện</h3>
+                    <p className="text-xs text-stone-400 font-medium uppercase tracking-wider">300+ NPC đang bàn tán sôi nổi</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={handleGenerateGossip}
+                    disabled={isGeneratingGossip}
+                    className="p-3 text-[#DB2777] hover:bg-pink-50 rounded-2xl transition-all disabled:opacity-50"
+                    title="Làm mới bình luận"
+                  >
+                    <Sparkles size={20} className={isGeneratingGossip ? 'animate-spin' : ''} />
+                  </button>
+                  <button onClick={() => setShowGossipGroup(false)} className="p-3 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-2xl transition-all">
+                    <X size={24} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                {isGeneratingGossip && npcComments.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-10">
+                    <div className="w-16 h-16 border-4 border-pink-100 border-t-[#DB2777] rounded-full animate-spin mb-6" />
+                    <h4 className="text-xl font-bold text-stone-700 mb-2">Đang kết nối với NPC...</h4>
+                    <p className="text-stone-400 mb-6">Các NPC đang đọc chương mới và chuẩn bị "khẩu chiến"</p>
+                    <button 
+                      onClick={cancelGossipGeneration}
+                      className="px-6 py-2 bg-white text-stone-500 hover:text-red-500 hover:bg-red-50 rounded-full font-bold shadow-sm border border-stone-200 transition-all"
+                    >
+                      Hủy kết nối
+                    </button>
+                  </div>
+                ) : npcComments.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-10">
+                    <MessageSquare size={64} className="text-stone-200 mb-6" />
+                    <h4 className="text-xl font-bold text-stone-400 mb-2">Chưa có ai bàn tán</h4>
+                    <p className="text-stone-300">Hãy viết xong một chương để các NPC có chuyện để nói!</p>
+                  </div>
+                ) : (
+                  npcComments.map((comment) => (
+                    <motion.div 
+                      key={comment.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="flex gap-4 group"
+                    >
+                      <img src={comment.npcAvatar} alt={comment.npcName} className="w-12 h-12 rounded-2xl shadow-md border-2 border-white flex-shrink-0" />
+                      <div className="flex-1">
+                        <div className="bg-white/90 backdrop-blur-sm p-4 rounded-3xl rounded-tl-none shadow-sm border border-pink-50 group-hover:shadow-md transition-shadow">
+                          <div className="flex justify-between items-center mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-stone-800 text-sm">{comment.npcName}</span>
+                              <span className="px-2 py-0.5 bg-pink-50 text-[#DB2777] text-[10px] font-bold rounded-full uppercase tracking-tighter">{comment.npcRole}</span>
+                            </div>
+                            <span className="text-[10px] text-stone-400">{comment.timestamp}</span>
+                          </div>
+                          <p className="text-stone-600 text-sm leading-relaxed">{comment.content}</p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+
+              <div className={`p-6 border-t border-pink-100 ${currentNovel?.npcGlobalBackground ? 'bg-white/80 backdrop-blur-md' : 'bg-white'}`}>
+                <div className="flex gap-3">
+                  <input 
+                    type="text" 
+                    placeholder="Bạn cũng muốn tham gia cãi nhau? (Tính năng sắp ra mắt)" 
+                    disabled
+                    className="flex-1 p-4 bg-stone-50 border border-stone-100 rounded-2xl text-sm outline-none opacity-50 cursor-not-allowed"
+                  />
+                  <button disabled className="p-4 bg-stone-200 text-stone-400 rounded-2xl cursor-not-allowed">
+                    <Send size={20} />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Success Toast */}
+      <AnimatePresence>
+        {successMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-2xl shadow-2xl z-[300] flex items-center gap-3"
+          >
+            <div className="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center">
+              <Sparkles size={14} />
+            </div>
+            <span className="font-medium">{successMessage}</span>
+            <button onClick={() => setSuccessMessage(null)} className="ml-4 text-white/60 hover:text-white transition-colors"><X size={16} /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Global Confirmation Modal */}
+      <AnimatePresence>
+        {confirmConfig && (
+          <div className="fixed inset-0 z-[400] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setConfirmConfig(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center"
+            >
+              <h3 className="text-2xl font-bold text-stone-800 mb-2">{confirmConfig.title}</h3>
+              <p className="text-stone-500 mb-8">{confirmConfig.message}</p>
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setConfirmConfig(null)}
+                  className="flex-1 py-3 px-6 rounded-xl font-bold text-stone-500 hover:bg-stone-100 transition-colors"
+                >
+                  Hủy
+                </button>
+                <button 
+                  onClick={confirmConfig.onConfirm}
+                  className="flex-1 py-3 px-6 rounded-xl font-bold bg-[#DB2777] text-white hover:bg-[#BE185D] transition-colors shadow-lg shadow-[#DB2777]/20"
+                >
+                  Xác nhận
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Error Toast */}
       <AnimatePresence>
@@ -939,7 +1645,7 @@ YÊU CẦU NỘI DUNG:
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
-            className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-2xl shadow-2xl z-[100] flex items-center gap-3"
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-2xl shadow-2xl z-[300] flex items-center gap-3"
           >
             <X size={20} />
             <span className="font-medium">{error}</span>
@@ -947,6 +1653,21 @@ YÊU CẦU NỘI DUNG:
           </motion.div>
         )}
       </AnimatePresence>
+
+      <input 
+        type="file" 
+        ref={npcBgInputRef} 
+        className="hidden" 
+        accept="image/*" 
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => updateCurrentNovel({ npcGlobalBackground: reader.result as string });
+            reader.readAsDataURL(file);
+          }
+        }} 
+      />
     </motion.div>
   );
 };

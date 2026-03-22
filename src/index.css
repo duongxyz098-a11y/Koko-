@@ -16,3 +16,89 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #f0a0b0;
 }
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+.backface-hidden {
+  backface-visibility: hidden;
+}
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Sparkle Effects */
+@keyframes float-sparkle {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0.5; }
+  50% { transform: translateY(-10px) scale(1.2); opacity: 1; }
+}
+@keyframes pulse-pink {
+  0%, 100% { box-shadow: 0 0 10px rgba(255, 182, 193, 0.4); }
+  50% { box-shadow: 0 0 20px rgba(255, 105, 180, 0.8); }
+}
+@keyframes shimmer-pink {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.sparkle-effect-0 {
+  animation: pulse-pink 3s infinite;
+  position: relative;
+}
+.sparkle-effect-0::before {
+  content: '✨';
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  font-size: 20px;
+  animation: float-sparkle 2s infinite ease-in-out;
+  z-index: 10;
+}
+
+.sparkle-effect-1 {
+  position: relative;
+  overflow: hidden;
+}
+.sparkle-effect-1::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; width: 200%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 192, 203, 0.4), transparent);
+  animation: shimmer-pink 4s infinite linear;
+  pointer-events: none;
+}
+
+.sparkle-effect-2 {
+  border: 2px solid transparent;
+  background-image: linear-gradient(white, white), linear-gradient(45deg, #ffb6c1, #ff69b4, #ffb6c1);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  position: relative;
+}
+.sparkle-effect-2::before, .sparkle-effect-2::after {
+  content: '🌸';
+  position: absolute;
+  font-size: 16px;
+  animation: float-sparkle 3s infinite ease-in-out;
+  z-index: 10;
+}
+.sparkle-effect-2::before { top: -8px; left: -8px; animation-delay: 0s; }
+.sparkle-effect-2::after { bottom: -8px; right: -8px; animation-delay: 1.5s; }
+
+.sparkle-effect-3 {
+  box-shadow: inset 0 0 15px rgba(255, 105, 180, 0.3);
+  position: relative;
+}
+.sparkle-effect-3::before {
+  content: '💖';
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 18px;
+  animation: float-sparkle 2.5s infinite ease-in-out;
+  z-index: 10;
+}

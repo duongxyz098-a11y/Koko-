@@ -19,9 +19,10 @@ import DatingScreen from './components/DatingScreen';
 import KokoYouTube from './components/KokoYouTube';
 import LoveShowScreen from './components/LoveShowScreen';
 import NovelScreen from './components/NovelScreen';
+import RenGram from './components/RenGram';
 
 export default function App() {
-  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating' | 'youtube' | 'loveshow' | 'novel'>('lock');
+  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating' | 'youtube' | 'loveshow' | 'novel' | 'rengram'>('lock');
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<ApiSettingsData>(() => {
     const saved = localStorage.getItem('kotokoo_settings');
@@ -54,6 +55,7 @@ export default function App() {
               openYouTube={() => setScreen('youtube')}
               openLoveShow={() => setScreen('loveshow')}
               openNovel={() => setScreen('novel')}
+              openRenGram={() => setScreen('rengram')}
             />
           )}
           {screen === 'koko' && (
@@ -70,6 +72,9 @@ export default function App() {
           )}
           {screen === 'novel' && (
             <NovelScreen key="novel" onBack={() => setScreen('home')} />
+          )}
+          {screen === 'rengram' && (
+            <RenGram key="rengram" onBack={() => setScreen('home')} />
           )}
         </AnimatePresence>
 
