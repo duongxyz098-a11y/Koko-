@@ -3,11 +3,28 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, Heart, Star, Coffee, MessageCircle, User, Settings, Image as ImageIcon, Loader2, Send } from 'lucide-react';
 import { generateNPCs, generateLoveQuiz, generateCafeScenarios, generateNPCResponse, NPCProfile, QuizQuestion, CafeScenario, UserProfile } from '../services/geminiService';
 import { sendCoreMessage } from '../services/coreAi';
+import { saveToDB, getFromDB } from '../utils/indexedDB';
+import { compressImage } from '../utils/imageUtils';
 
 export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   const [activeTab, setActiveTab] = useState<'apply' | 'show'>('apply');
-  const [appBackground, setAppBackground] = useState(() => localStorage.getItem('loveshow_bg') || '');
-  const bgInputRef = useRef<HTMLInputElement>(null);
+  const [appBackground, setAppBackground] = useState('');
+
+  useEffect(() => {
+    const loadBg = async () => {
+      const saved = await getFromDB('backgrounds', 'loveshow_bg');
+      if (saved) setAppBackground(saved);
+      else {
+        const legacy = localStorage.getItem('loveshow_bg');
+        if (legacy) {
+          setAppBackground(legacy);
+          await saveToDB('backgrounds', 'loveshow_bg', legacy);
+          localStorage.removeItem('loveshow_bg');
+        }
+      }
+    };
+    loadBg();
+  }, []);
   
   // Game State
   const [npcs, setNpcs] = useState<NPCProfile[]>(() => {
@@ -172,16 +189,16 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const handleBgChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBgChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        setAppBackground(result);
-        localStorage.setItem('loveshow_bg', result);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 3840, 2160, 0.9);
+        setAppBackground(compressed);
+        await saveToDB('backgrounds', 'loveshow_bg', compressed);
+      } catch (error) {
+        console.error("Failed to upload loveshow background", error);
+      }
     }
   };
 
@@ -207,10 +224,10 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
           <button onClick={() => { console.log("Settings button clicked"); setShowSettings(true); }} className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors">
             <Settings size={20} />
           </button>
-          <button onClick={() => bgInputRef.current?.click()} className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors">
+          <label className="p-2 text-[#F3B4C2] hover:bg-[#FFF5F7] rounded-full transition-colors cursor-pointer flex items-center justify-center">
             <ImageIcon size={20} />
-          </button>
-          <input type="file" ref={bgInputRef} onChange={handleBgChange} accept="image/*" className="hidden" />
+            <input type="file" onChange={handleBgChange} accept="image/*" className="hidden" />
+          </label>
         </div>
       </div>
 

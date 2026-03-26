@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Edit2, Trash2 } from 'lucide-react';
+import { Edit2, Trash2, Plus } from 'lucide-react';
+import CarrdProfile from '../../components/CarrdProfile';
 
 export default function HubTab({ onSelectChar, onEditChar }: { onSelectChar: (char: any) => void, onEditChar: (char: any) => void }) {
+  const [showCarrd, setShowCarrd] = useState(true);
   const [chars, setChars] = useState<any[]>([]);
 
   useEffect(() => {
@@ -29,10 +31,32 @@ export default function HubTab({ onSelectChar, onEditChar }: { onSelectChar: (ch
     }
   };
 
+  if (showCarrd) {
+    return (
+      <div className="relative h-full">
+        <div className="absolute top-4 right-4 z-50">
+          <button 
+            onClick={() => setShowCarrd(false)}
+            className="bg-white/80 backdrop-blur px-3 py-1 rounded-full text-xs font-bold text-[#F3B4C2] shadow-sm border border-[#F9C6D4]"
+          >
+            Xem Nhân Vật →
+          </button>
+        </div>
+        <CarrdProfile />
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 pt-16">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-[#F3B4C2]">Nhân Vật Của Tôi ♡</h1>
+        <button 
+          onClick={() => setShowCarrd(true)}
+          className="bg-white/80 backdrop-blur px-3 py-1 rounded-full text-xs font-bold text-[#F3B4C2] shadow-sm border border-[#F9C6D4]"
+        >
+          ← Xem Profile
+        </button>
       </div>
 
       <div className="flex flex-col gap-6">

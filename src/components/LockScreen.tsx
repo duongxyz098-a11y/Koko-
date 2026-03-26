@@ -1,25 +1,42 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Camera, Fingerprint, Star, Heart, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { saveToDB, getFromDB } from '../utils/indexedDB';
+import { compressImage } from '../utils/imageUtils';
 
 export default function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const [time, setTime] = useState(new Date());
   const [greeting, setGreeting] = useState('');
-  const [appBackground, setAppBackground] = useState(() => localStorage.getItem('lock_bg') || 'https://i.postimg.cc/9FnXQNpn/e1d0cd594c41440c5e1dadc28f25c69a.jpg');
-  const bgInputRef = useRef<HTMLInputElement>(null);
+  const [appBackground, setAppBackground] = useState('');
 
   useEffect(() => {
-    localStorage.setItem('lock_bg', appBackground);
-  }, [appBackground]);
+    const loadBg = async () => {
+      const saved = await getFromDB('backgrounds', 'lock_bg');
+      if (saved) setAppBackground(saved);
+      else {
+        const legacy = localStorage.getItem('lock_bg');
+        if (legacy) {
+          setAppBackground(legacy);
+          await saveToDB('backgrounds', 'lock_bg', legacy);
+          localStorage.removeItem('lock_bg');
+        } else {
+          setAppBackground('https://i.postimg.cc/9FnXQNpn/e1d0cd594c41440c5e1dadc28f25c69a.jpg');
+        }
+      }
+    };
+    loadBg();
+  }, []);
 
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAppBackground(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 3840, 2160, 0.9);
+        setAppBackground(compressed);
+        await saveToDB('backgrounds', 'lock_bg', compressed);
+      } catch (error) {
+        console.error("Failed to upload lock background", error);
+      }
     }
   };
 
@@ -62,20 +79,18 @@ export default function LockScreen({ onUnlock }: { onUnlock: () => void }) {
 
       {/* Top Bar for Background Upload */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-end z-20 pt-safe">
-        <input 
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          ref={bgInputRef} 
-          onChange={handleBgUpload} 
-        />
-        <button 
-          onClick={() => bgInputRef.current?.click()}
+        <label 
           className="text-[12px] px-3 py-1.5 rounded-full bg-white/30 backdrop-blur-md border border-white/20 shadow-sm flex items-center gap-1.5 cursor-pointer hover:bg-white/50 transition-colors text-gray-800 font-medium"
         >
           <ImageIcon size={14} />
           Đổi nền
-        </button>
+          <input 
+            type="file" 
+            accept="image/*" 
+            className="hidden" 
+            onChange={handleBgUpload} 
+          />
+        </label>
       </div>
 
       {/* Content */}

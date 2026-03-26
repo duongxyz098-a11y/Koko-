@@ -1,61 +1,70 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera, Heart, Tv, BookOpen, Sparkles } from 'lucide-react';
+import { saveToDB, getFromDB } from '../utils/indexedDB';
+import { compressImage } from '../utils/imageUtils';
 
 const pages = [0, 1, 2];
 
-export default function HomeScreen({ openSettings, openKoko, openDating, openYouTube, openLoveShow, openNovel, openKikokoNovel, openRenGram, openKokoRoleplay, openUserProfile, openBanhNho }: { openSettings: () => void, openKoko: () => void, openDating: () => void, openYouTube: () => void, openLoveShow: () => void, openNovel: () => void, openKikokoNovel: () => void, openRenGram: () => void, openKokoRoleplay: () => void, openUserProfile: () => void, openBanhNho: () => void }) {
+export default function HomeScreen({ openSettings, openKoko, openDating, openYouTube, openLoveShow, openNovel, openKikokoNovel, openRenGram, openKokoRoleplay, openUserProfile, openBanhNho, openCarrd }: { openSettings: () => void, openKoko: () => void, openDating: () => void, openYouTube: () => void, openLoveShow: () => void, openNovel: () => void, openKikokoNovel: () => void, openRenGram: () => void, openKokoRoleplay: () => void, openUserProfile: () => void, openBanhNho: () => void, openCarrd: () => void }) {
   const [currentPage, setCurrentPage] = useState(0);
-  const [appBackground, setAppBackground] = useState(() => localStorage.getItem('home_bg') || '');
-  const bgInputRef = useRef<HTMLInputElement>(null);
+  const [appBackground, setAppBackground] = useState('');
 
   useEffect(() => {
-    localStorage.setItem('home_bg', appBackground);
-  }, [appBackground]);
+    const loadBg = async () => {
+      const saved = await getFromDB('backgrounds', 'home_bg');
+      if (saved) setAppBackground(saved);
+      else {
+        const legacy = localStorage.getItem('home_bg');
+        if (legacy) {
+          setAppBackground(legacy);
+          await saveToDB('backgrounds', 'home_bg', legacy);
+          localStorage.removeItem('home_bg');
+        }
+      }
+    };
+    loadBg();
+  }, []);
 
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAppBackground(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 3840, 2160, 0.9);
+        setAppBackground(compressed);
+        await saveToDB('backgrounds', 'home_bg', compressed);
+      } catch (error) {
+        console.error("Failed to upload home background", error);
+      }
     }
   };
 
   return (
     <div 
-      className="absolute inset-0 w-full h-full bg-[#FAF9F6] overflow-hidden bg-cover bg-center transition-all duration-300"
+      className={`absolute inset-0 w-full h-full overflow-hidden bg-cover bg-center transition-all duration-300 ${!appBackground ? 'heart-pattern' : ''}`}
       style={{ backgroundImage: appBackground ? `url('${appBackground}')` : 'none' }}
     >
       {/* Pattern */}
       {!appBackground && (
         <div 
-          className="absolute inset-0 w-full h-full opacity-50"
-          style={{ 
-            backgroundImage: 'radial-gradient(#00000022 1px, transparent 1px)',
-            backgroundSize: '20px 20px'
-          }}
+          className="absolute inset-0 w-full h-full opacity-30"
         />
       )}
 
       {/* Top Bar for Background Upload */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-end z-20 pt-safe">
-        <input 
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          ref={bgInputRef} 
-          onChange={handleBgUpload} 
-        />
-        <button 
-          onClick={() => bgInputRef.current?.click()}
+        <label 
           className="text-[12px] px-3 py-1.5 rounded-full bg-white/50 backdrop-blur-md border border-white/40 shadow-sm flex items-center gap-1.5 cursor-pointer hover:bg-white/70 transition-colors text-gray-700 font-medium"
         >
           <ImageIcon size={14} />
           Đổi nền
-        </button>
+          <input 
+            type="file" 
+            accept="image/*" 
+            className="hidden" 
+            onChange={handleBgUpload} 
+          />
+        </label>
       </div>
 
       {/* Pages */}

@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Menu, Image as ImageIcon, X, ChevronLeft, Upload, Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ChatScreen from './ChatScreen';
+import { saveToDB, getFromDB } from '../utils/indexedDB';
+import { compressImage } from '../utils/imageUtils';
 
 interface Prompt {
   id: string;
@@ -48,9 +50,23 @@ export default function KokoScreen({ onBack }: { onBack: () => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activeChatPrompt, setActiveChatPrompt] = useState<Prompt | null>(null);
-  const [appBackground, setAppBackground] = useState(() => localStorage.getItem('koko_bg') || '');
-  const bgInputRef = useRef<HTMLInputElement>(null);
-  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [appBackground, setAppBackground] = useState('');
+
+  useEffect(() => {
+    const loadBg = async () => {
+      const saved = await getFromDB('backgrounds', 'koko_bg');
+      if (saved) setAppBackground(saved);
+      else {
+        const legacy = localStorage.getItem('koko_bg');
+        if (legacy) {
+          setAppBackground(legacy);
+          await saveToDB('backgrounds', 'koko_bg', legacy);
+          localStorage.removeItem('koko_bg');
+        }
+      }
+    };
+    loadBg();
+  }, []);
 
   // Form state
   const [avatarUrl, setAvatarUrl] = useState('');
@@ -69,25 +85,28 @@ export default function KokoScreen({ onBack }: { onBack: () => void }) {
     localStorage.setItem('koko_bg', appBackground);
   }, [appBackground]);
 
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAppBackground(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 3840, 2160, 0.9);
+        setAppBackground(compressed);
+        await saveToDB('backgrounds', 'koko_bg', compressed);
+      } catch (error) {
+        console.error("Failed to upload koko background", error);
+      }
     }
   };
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAvatarUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 800, 800, 0.8);
+        setAvatarUrl(compressed);
+      } catch (error) {
+        console.error("Failed to upload avatar", error);
+      }
     }
   };
 
@@ -171,20 +190,18 @@ export default function KokoScreen({ onBack }: { onBack: () => void }) {
         </button>
         <span className="text-[18px] font-medium truncate absolute left-0 right-0 text-center pointer-events-none">Koko Sách Thế Giới</span>
         
-        <input 
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          ref={bgInputRef} 
-          onChange={handleBgUpload} 
-        />
-        <button 
-          onClick={() => bgInputRef.current?.click()}
+        <label 
           className="text-[12px] px-2 py-1.5 rounded-[8px] border border-[#8c8286] bg-transparent flex items-center gap-1 cursor-pointer hover:bg-black/5 transition-colors z-20 relative bg-white/50"
         >
           <ImageIcon size={14} />
           Đổi nền
-        </button>
+          <input 
+            type="file" 
+            accept="image/*" 
+            className="hidden" 
+            onChange={handleBgUpload} 
+          />
+        </label>
       </div>
 
       {/* DANH SÁCH TRƯNG BÀY */}
@@ -245,20 +262,18 @@ export default function KokoScreen({ onBack }: { onBack: () => void }) {
                     className="w-[60px] h-[60px] rounded-[12px] bg-[#D9CFC9] bg-cover bg-center shrink-0 border border-[#F3B4C2]"
                     style={{ backgroundImage: avatarUrl ? `url('${avatarUrl}')` : 'none' }}
                   />
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    className="hidden" 
-                    ref={avatarInputRef} 
-                    onChange={handleAvatarUpload} 
-                  />
-                  <button 
-                    onClick={() => avatarInputRef.current?.click()}
+                  <label 
                     className="flex-1 p-3 border border-[#D9CFC9] rounded-[12px] bg-white text-[14px] text-[#5a5255] flex items-center justify-center gap-2 hover:bg-gray-50 transition-colors cursor-pointer"
                   >
                     <Upload size={18} />
                     Tải ảnh từ thiết bị
-                  </button>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={handleAvatarUpload} 
+                    />
+                  </label>
                 </div>
               </div>
 

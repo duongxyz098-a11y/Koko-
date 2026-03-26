@@ -662,7 +662,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
               style={{ backgroundImage: cardBgs['status'] ? `url(${cardBgs['status']})` : 'none' }}
             >
               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-pink-200 via-white to-pink-200 z-10"></div>
-              {cardBgs['status'] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-0"></div>}
+              {cardBgs['status'] && <div className="absolute inset-0 bg-white/30 z-0"></div>}
               
               <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
                 <ImageIcon className="w-4 h-4" />
@@ -687,7 +687,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
               className="bg-white/80 rounded-3xl p-6 shadow-sm border border-pink-100 relative bg-cover bg-center group"
               style={{ backgroundImage: cardBgs['custom'] ? `url(${cardBgs['custom']})` : 'none' }}
             >
-              {cardBgs['custom'] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] rounded-3xl z-0"></div>}
+              {cardBgs['custom'] && <div className="absolute inset-0 bg-white/30 rounded-3xl z-0"></div>}
               
               <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
                 <ImageIcon className="w-4 h-4" />
@@ -711,7 +711,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
               className="bg-white/80 rounded-3xl p-6 shadow-sm border border-pink-100 relative bg-cover bg-center group"
               style={{ backgroundImage: cardBgs['npc'] ? `url(${cardBgs['npc']})` : 'none' }}
             >
-              {cardBgs['npc'] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] rounded-3xl z-0"></div>}
+              {cardBgs['npc'] && <div className="absolute inset-0 bg-white/30 rounded-3xl z-0"></div>}
               
               <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
                 <ImageIcon className="w-4 h-4" />
@@ -843,7 +843,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
                       className={`backface-hidden bg-white/90 rounded-[2rem] overflow-hidden shadow-sm border border-pink-100 bg-cover bg-center sparkle-effect-${idx % 4}`}
                       style={{ backgroundImage: post.bgImage ? `url(${post.bgImage})` : 'none' }}
                     >
-                      {post.bgImage && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-0"></div>}
+                      {post.bgImage && <div className="absolute inset-0 bg-white/30 z-0"></div>}
                       
                       <div className="relative z-10">
                         <div className="p-4 flex items-center gap-3">
@@ -1023,7 +1023,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
               className="bg-white/90 backdrop-blur-sm rounded-3xl p-6 shadow-sm border border-pink-100 relative bg-cover bg-center group"
               style={{ backgroundImage: cardBgs['create_post'] ? `url(${cardBgs['create_post']})` : 'none' }}
             >
-              {cardBgs['create_post'] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] rounded-3xl z-0"></div>}
+              {cardBgs['create_post'] && <div className="absolute inset-0 bg-white/30 rounded-3xl z-0"></div>}
               
               <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
                 <ImageIcon className="w-4 h-4" />
@@ -1097,7 +1097,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
                   className="bg-white rounded-3xl overflow-hidden shadow-md border border-pink-100 relative bg-cover bg-center group"
                   style={{ backgroundImage: cardBgs[post.id] ? `url(${cardBgs[post.id]})` : 'none' }}
                 >
-                  {cardBgs[post.id] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-0"></div>}
+                  {cardBgs[post.id] && <div className="absolute inset-0 bg-white/30 z-0"></div>}
                   
                   <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
                     <ImageIcon className="w-5 h-5" />
@@ -1155,7 +1155,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
               style={{ backgroundImage: cardBgs['club_header'] ? `url(${cardBgs['club_header']})` : 'none' }}
             >
               <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-              {cardBgs['club_header'] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-0"></div>}
+              {cardBgs['club_header'] && <div className="absolute inset-0 bg-white/30 z-0"></div>}
               
               <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
                 <ImageIcon className="w-4 h-4" />
@@ -1170,7 +1170,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
               className="bg-white/80 rounded-3xl p-6 shadow-sm border border-pink-100 relative bg-cover bg-center group"
               style={{ backgroundImage: cardBgs['club_topics'] ? `url(${cardBgs['club_topics']})` : 'none' }}
             >
-              {cardBgs['club_topics'] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] rounded-3xl z-0"></div>}
+              {cardBgs['club_topics'] && <div className="absolute inset-0 bg-white/30 rounded-3xl z-0"></div>}
               
               <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
                 <ImageIcon className="w-4 h-4" />
@@ -1196,7 +1196,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
               className="bg-white/80 rounded-3xl p-6 shadow-sm border border-pink-100 relative bg-cover bg-center group"
               style={{ backgroundImage: cardBgs['club_members'] ? `url(${cardBgs['club_members']})` : 'none' }}
             >
-              {cardBgs['club_members'] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] rounded-3xl z-0"></div>}
+              {cardBgs['club_members'] && <div className="absolute inset-0 bg-white/30 rounded-3xl z-0"></div>}
               
               <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
                 <ImageIcon className="w-4 h-4" />
@@ -1249,7 +1249,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
                   style={{ backgroundImage: card.bgImage ? `url(${card.bgImage})` : 'none' }}
                 >
                   {/* Overlay for readability if bgImage is present */}
-                  {card.bgImage && <div className="absolute inset-0 bg-white/60 rounded-3xl backdrop-blur-[2px]"></div>}
+                  {card.bgImage && <div className="absolute inset-0 bg-white/30 rounded-3xl"></div>}
                   
                   <div className="relative z-10 flex flex-col gap-3 h-full">
                   {card.isEditing ? (

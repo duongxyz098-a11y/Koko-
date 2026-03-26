@@ -1,13 +1,114 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Settings, Database, List, Instagram, Clock, Key, CreditCard, Info, Image as ImageIcon, Youtube, Users, BookOpen, FileText, Shield, Wallet, Mic, Video, Globe } from 'lucide-react';
+import { ArrowLeft, Settings, Database, List, Instagram, Clock, Key, CreditCard, Info, Image as ImageIcon, Youtube, Users, BookOpen, FileText, Shield, Wallet, Mic, Video, Globe, Plus } from 'lucide-react';
 import { safeSetItem } from '../utils/storage';
 import { compressImage } from '../utils/imageUtils';
 import { fetchAvailableModels, ApiProxySettings } from '../utils/apiProxy';
 import { saveToDB, getAllFromDB } from '../utils/indexedDB';
+import Tab1CreateBot from './banhnho/Tab1CreateBot';
+import CarrdProfile from './CarrdProfile';
+
+interface Character {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
+// Helper component for tab layout with background support
+const TabWrapper = ({ children, bg, onBgUpload }: { children: React.ReactNode, bg?: string, onBgUpload: (e: React.ChangeEvent<HTMLInputElement>) => void }) => {
+  return (
+    <div className="h-full relative bg-[#FAF9F6] overflow-hidden">
+      {/* Background Image */}
+      {bg && (
+        <div 
+          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
+          style={{ 
+            backgroundImage: `url('${bg}')`
+          }}
+        />
+      )}
+      
+      {/* Grain / noise nhẹ */}
+      <div className="absolute inset-0 z-0 opacity-[0.02] pointer-events-none mix-blend-overlay" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }}></div>
+
+      {/* Upload Button */}
+      <div className="absolute top-4 right-4 z-20">
+        <label 
+          className="p-2 bg-white/40 rounded-full hover:bg-white/60 shadow-sm border border-white/20 transition-all cursor-pointer flex items-center justify-center"
+          title="Đổi ảnh nền"
+        >
+          <ImageIcon size={20} className="text-[#F3B4C2]" />
+          <input 
+            type="file" 
+            accept="image/*" 
+            className="hidden" 
+            onChange={onBgUpload} 
+          />
+        </label>
+      </div>
+
+      {/* Content Area */}
+      <div className="relative z-10 h-full overflow-y-auto">
+        {children}
+      </div>
+    </div>
+  );
+};
 
 export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('banhnho_active_tab') || 'tab1');
   const [subTab, setSubTab] = useState<string | null>(() => localStorage.getItem('banhnho_sub_tab'));
+
+  // Multi-character state
+  const [characters, setCharacters] = useState<Character[]>(() => {
+    const saved = localStorage.getItem('banhnho_characters');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    // Default character if none exist
+    return [{ id: 'default', name: 'Nhân vật mặc định', createdAt: Date.now() }];
+  });
+
+  const [activeCharacterId, setActiveCharacterId] = useState(() => {
+    return localStorage.getItem('banhnho_active_character_id') || 'default';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('banhnho_characters', JSON.stringify(characters));
+  }, [characters]);
+
+  useEffect(() => {
+    localStorage.setItem('banhnho_active_character_id', activeCharacterId);
+  }, [activeCharacterId]);
+
+  const handleCreateCharacter = () => {
+    const newId = `char_${Date.now()}`;
+    const newChar: Character = {
+      id: newId,
+      name: 'Nhân vật mới',
+      createdAt: Date.now()
+    };
+    setCharacters(prev => [...prev, newChar]);
+    setActiveCharacterId(newId);
+    setSubTab(null); // Go to setup
+    showToast("Đã tạo nhân vật mới! Hãy bắt đầu thiết lập.");
+  };
+
+  const handleDeleteCharacter = (id: string) => {
+    if (id === 'default' && characters.length === 1) {
+      showToast("Không thể xóa nhân vật cuối cùng.");
+      return;
+    }
+    const updated = characters.filter(c => c.id !== id);
+    setCharacters(updated);
+    if (activeCharacterId === id) {
+      setActiveCharacterId(updated[0]?.id || 'default');
+    }
+    showToast("Đã xóa nhân vật.");
+  };
+
+  const updateCharacterName = (id: string, newName: string) => {
+    setCharacters(prev => prev.map(c => c.id === id ? { ...c, name: newName } : c));
+  };
 
   useEffect(() => {
     localStorage.setItem('banhnho_active_tab', activeTab);
@@ -49,12 +150,12 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
         if (!models.includes(apiSettings.model)) {
           setApiSettings({ ...apiSettings, model: models[0] });
         }
-        alert(`Đã tải thành công ${models.length} models! Vui lòng chọn model ở bên dưới.`);
+        showToast(`Đã tải thành công ${models.length} models! Vui lòng chọn model ở bên dưới.`);
       } else {
-        alert("Không tìm thấy model nào từ API này. Bạn có thể nhập tên model thủ công.");
+        showToast("Không tìm thấy model nào từ API này. Bạn có thể nhập tên model thủ công.");
       }
     } catch (error: any) {
-      alert(`Không thể lấy danh sách model tự động:\n${error.message}\n\nMẹo: Bạn vẫn có thể tự gõ tên model (VD: gpt-3.5-turbo) vào ô bên dưới nếu biết chính xác tên model của Proxy này.`);
+      showToast(`Không thể lấy danh sách model tự động: ${error.message}`);
     } finally {
       setIsFetchingModels(false);
     }
@@ -63,9 +164,7 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
   const saveApiSettings = () => {
     safeSetItem('banhnho_api_settings', JSON.stringify(apiSettings));
     setIsSettingsSaved(true);
-    setTimeout(() => {
-      alert('Đã lưu cấu hình API thành công! Hệ thống đã sẵn sàng xử lý dữ liệu lớn.');
-    }, 10);
+    showToast('Đã lưu cấu hình API thành công! Hệ thống đã sẵn sàng xử lý dữ liệu lớn.');
     setTimeout(() => setIsSettingsSaved(false), 2000);
   };
 
@@ -80,10 +179,16 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
   const [profileName, setProfileName] = useState('');
   const [isProfileSaved, setIsProfileSaved] = useState(false);
   const [isSettingsSaved, setIsSettingsSaved] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   const handleSaveProfile = () => {
     if (!profileName.trim()) {
-      alert("Vui lòng nhập tên cho cấu hình này (VD: OpenAI, Claude...)");
+      showToast("Vui lòng nhập tên cho cấu hình này (VD: OpenAI, Claude...)");
       return;
     }
     
@@ -100,24 +205,23 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
     setProfileName('');
     
     setIsProfileSaved(true);
-    setTimeout(() => {
-      alert(`Đã lưu cấu hình "${savedName}" thành công!`);
-    }, 10);
+    showToast(`Đã lưu cấu hình "${savedName}" thành công!`);
     setTimeout(() => setIsProfileSaved(false), 2000);
   };
 
   const handleLoadProfile = (profile: ApiProxySettings) => {
     setApiSettings(profile);
     safeSetItem('banhnho_api_settings', JSON.stringify(profile));
-    alert(`Đã tải cấu hình "${profile.name}".`);
+    showToast(`Đã tải cấu hình "${profile.name}".`);
   };
 
   const handleDeleteProfile = (id: string) => {
-    if (window.confirm("Bạn có chắc chắn muốn xóa cấu hình này?")) {
-      const updatedProfiles = savedProfiles.filter(p => p.id !== id);
-      setSavedProfiles(updatedProfiles);
-      safeSetItem('banhnho_api_profiles', JSON.stringify(updatedProfiles));
-    }
+    // Custom confirm logic is hard without a modal component, so we just delete directly for now 
+    // or we can add a simple state for it. Let's just delete directly and show a toast.
+    const updatedProfiles = savedProfiles.filter(p => p.id !== id);
+    setSavedProfiles(updatedProfiles);
+    safeSetItem('banhnho_api_profiles', JSON.stringify(updatedProfiles));
+    showToast("Đã xóa cấu hình.");
   };
 
   // Backgrounds for all 20 tabs - stored in IndexedDB to avoid quota issues
@@ -164,172 +268,130 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
     loadBgs();
   }, []);
 
-  const bgInputRef = useRef<HTMLInputElement>(null);
-
   const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       try {
-        // Compress to a high resolution since IndexedDB has huge storage limits
-        const compressed = await compressImage(file, 1920, 1080, 0.85);
+        // High resolution for "DỮ LIỆU KHỦNG"
+        const compressed = await compressImage(file, 3840, 2160, 0.9);
         await saveToDB('backgrounds', activeTab, compressed);
         
         const newBgs = { ...tabBgs, [activeTab]: compressed };
         setTabBgs(newBgs);
+        showToast("Đã lưu ảnh nền thành công!");
       } catch (error) {
         console.error("Failed to compress or save background:", error);
-        alert("Có lỗi xảy ra khi xử lý ảnh nền.");
+        showToast("Có lỗi xảy ra khi xử lý ảnh nền.");
       }
       e.target.value = '';
     }
   };
 
-  const TabWrapper = ({ children, tabId }: { children: React.ReactNode, tabId: string }) => {
-    const bg = tabBgs[tabId];
-    return (
-      <div className="h-full relative bg-[#FAF9F6] overflow-hidden">
-        {/* Background Image - No Blur, Full Clarity */}
-        {bg && (
-          <div 
-            className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
-            style={{ backgroundImage: `url('${bg}')` }}
-          />
-        )}
-        
-        {/* Upload Button */}
-        <div className="absolute top-4 right-4 z-20">
-          <button 
-            onClick={() => bgInputRef.current?.click()} 
-            className="p-2 bg-white/40 backdrop-blur-md rounded-full hover:bg-white/60 shadow-sm border border-white/20 transition-all"
-            title="Đổi ảnh nền"
-          >
-            <ImageIcon size={20} className="text-[#F3B4C2]" />
-          </button>
-        </div>
-
-        {/* Content Area */}
-        <div className="relative z-10 h-full overflow-y-auto">
-          {children}
-        </div>
-      </div>
-    );
-  };
-
   const renderTabContent = () => {
-    switch (activeTab) {
-      case 'tab1':
-        return (
-          <TabWrapper tabId="tab1">
-            {subTab === '1.0' ? (
-              <div className="p-4">
-                <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
-                <h2 className="text-xl font-bold text-[#8A7D85]">Trang Trưng Bày các nhân vật</h2>
-              </div>
-            ) : (
-              <div className="p-4">
-                <h2 className="text-xl font-bold text-[#8A7D85] mb-4">Tạo bot char chuyên nghiệp</h2>
-                <button onClick={() => setSubTab('1.0')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
-                  Đến Trang Trưng Bày (Tab 1.0)
+    const bg = tabBgs[activeTab];
+    
+    const content = (() => {
+      switch (activeTab) {
+        case 'tab1':
+          return subTab === '1.0' ? (
+            <div className="h-full flex flex-col">
+              <div className="p-4 flex items-center gap-4 bg-white/30 border-b border-[#F9C6D4]/30">
+                <button onClick={() => setSubTab(null)} className="text-[#F3B4C2] font-bold bg-white/50 px-4 py-2 rounded-full shadow-sm hover:bg-white/80 transition-all flex items-center gap-2">
+                  <ArrowLeft size={18} /> Quay lại thiết lập
                 </button>
+                <h2 className="text-xl font-bold text-[#8A7D85]">Trưng Bày: {characters.find(c => c.id === activeCharacterId)?.name}</h2>
               </div>
-            )}
-          </TabWrapper>
-        );
-      case 'tab2':
-        return (
-          <TabWrapper tabId="tab2">
+              <div className="flex-1 overflow-y-auto">
+                <CarrdProfile characterId={activeCharacterId} />
+              </div>
+            </div>
+          ) : (
+            <Tab1CreateBot 
+              activeCharacterId={activeCharacterId}
+              characters={characters}
+              onSelectCharacter={setActiveCharacterId}
+              onCreateCharacter={handleCreateCharacter}
+              onDeleteCharacter={handleDeleteCharacter}
+              onUpdateName={updateCharacterName}
+              onSaveComplete={() => setSubTab('1.0')} 
+            />
+          );
+        case 'tab2':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Diễn đàn</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab3':
-        return (
-          <TabWrapper tabId="tab3">
+          );
+        case 'tab3':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Blog của Bot char</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab4':
-        return (
-          <TabWrapper tabId="tab4">
+          );
+        case 'tab4':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Bộ Nhớ Dài hạn</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab5':
-        return (
-          <TabWrapper tabId="tab5">
-            {subTab === '5.0' ? (
-              <div className="p-4">
-                <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
-                <h2 className="text-xl font-bold text-[#8A7D85]">Thiết lập nhân vật chi tiết</h2>
-              </div>
-            ) : subTab === '5.1' ? (
-              <div className="p-4">
-                <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
-                <h2 className="text-xl font-bold text-[#8A7D85]">Gắn Prompt/Preset, SYSTEM</h2>
-              </div>
-            ) : (
-              <div className="p-4">
-                <h2 className="text-xl font-bold text-[#8A7D85] mb-4">Danh sách giao diện bot char</h2>
-                <div className="flex flex-col gap-3">
-                  <button onClick={() => setSubTab('5.0')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
-                    Thiết lập nhân vật chi tiết (Tab 5.0)
-                  </button>
-                  <button onClick={() => setSubTab('5.1')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
-                    Gắn Prompt/Preset, SYSTEM (Tab 5.1)
-                  </button>
-                </div>
-              </div>
-            )}
-          </TabWrapper>
-        );
-      case 'tab6':
-        return (
-          <TabWrapper tabId="tab6">
-            {subTab === '6.1' ? (
-              <div className="p-4">
-                <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
-                <h2 className="text-xl font-bold text-[#8A7D85]">Chi tiết Instagram</h2>
-              </div>
-            ) : (
-              <div className="p-4">
-                <h2 className="text-xl font-bold text-[#8A7D85] mb-4">Instagram của bot Char</h2>
-                <button onClick={() => setSubTab('6.1')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
-                  Xem chi tiết (Tab 6.1)
+          );
+        case 'tab5':
+          return subTab === '5.0' ? (
+            <div className="p-4">
+              <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
+              <h2 className="text-xl font-bold text-[#8A7D85]">Thiết lập nhân vật chi tiết</h2>
+            </div>
+          ) : subTab === '5.1' ? (
+            <div className="p-4">
+              <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
+              <h2 className="text-xl font-bold text-[#8A7D85]">Gắn Prompt/Preset, SYSTEM</h2>
+            </div>
+          ) : (
+            <div className="p-4">
+              <h2 className="text-xl font-bold text-[#8A7D85] mb-4">Danh sách giao diện bot char</h2>
+              <div className="flex flex-col gap-3">
+                <button onClick={() => setSubTab('5.0')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
+                  Thiết lập nhân vật chi tiết (Tab 5.0)
+                </button>
+                <button onClick={() => setSubTab('5.1')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
+                  Gắn Prompt/Preset, SYSTEM (Tab 5.1)
                 </button>
               </div>
-            )}
-          </TabWrapper>
-        );
-      case 'tab7':
-        return (
-          <TabWrapper tabId="tab7">
-            {subTab === '7.1' ? (
-              <div className="p-4">
-                <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
-                <h2 className="text-xl font-bold text-[#8A7D85]">Tương lai 10, 20, 30 năm sau</h2>
-              </div>
-            ) : (
-              <div className="p-4">
-                <h2 className="text-xl font-bold text-[#8A7D85] mb-4">Tương lai cuộc đời (5 năm sau)</h2>
-                <button onClick={() => setSubTab('7.1')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
-                  Xem xa hơn (Tab 7.1)
-                </button>
-              </div>
-            )}
-          </TabWrapper>
-        );
-      case 'tab8':
-        return (
-          <TabWrapper tabId="tab8">
+            </div>
+          );
+        case 'tab6':
+          return subTab === '6.1' ? (
+            <div className="p-4">
+              <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
+              <h2 className="text-xl font-bold text-[#8A7D85]">Chi tiết Instagram</h2>
+            </div>
+          ) : (
+            <div className="p-4">
+              <h2 className="text-xl font-bold text-[#8A7D85] mb-4">Instagram của bot Char</h2>
+              <button onClick={() => setSubTab('6.1')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
+                Xem chi tiết (Tab 6.1)
+              </button>
+            </div>
+          );
+        case 'tab7':
+          return subTab === '7.1' ? (
+            <div className="p-4">
+              <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
+              <h2 className="text-xl font-bold text-[#8A7D85]">Tương lai 10, 20, 30 năm sau</h2>
+            </div>
+          ) : (
+            <div className="p-4">
+              <h2 className="text-xl font-bold text-[#8A7D85] mb-4">Tương lai cuộc đời (5 năm sau)</h2>
+              <button onClick={() => setSubTab('7.1')} className="p-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-md">
+                Xem xa hơn (Tab 7.1)
+              </button>
+            </div>
+          );
+        case 'tab8':
+          return (
             <div className="p-4 max-w-md mx-auto">
               <h2 className="text-2xl font-bold text-[#8A7D85] mb-6 text-center">API Proxy Key Setup</h2>
               
-              <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-[#F9C6D4] flex flex-col gap-4">
+              <div className="bg-white/80 p-6 rounded-2xl shadow-sm border border-[#F9C6D4] flex flex-col gap-4">
                 <div>
                   <label className="block text-sm font-bold text-[#8A7D85] mb-1">Endpoint URL (v1)</label>
                   <input 
@@ -482,107 +544,89 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
                 </button>
               </div>
             </div>
-          </TabWrapper>
-        );
-      case 'tab9':
-        return (
-          <TabWrapper tabId="tab9">
+          );
+        case 'tab9':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Ngân Hàng của bot char</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab10':
-        return (
-          <TabWrapper tabId="tab10">
+          );
+        case 'tab10':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">About</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab11':
-        return (
-          <TabWrapper tabId="tab11">
+          );
+        case 'tab11':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Xem YouTube</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab12':
-        return (
-          <TabWrapper tabId="tab12">
+          );
+        case 'tab12':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Người nhà + Người thân nhận xét về Bot char</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab13':
-        return (
-          <TabWrapper tabId="tab13">
+          );
+        case 'tab13':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Viết Tiểu Thuyết Novel</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab14':
-        return (
-          <TabWrapper tabId="tab14">
+          );
+        case 'tab14':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Bài Đăng + NPC</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab15':
-        return (
-          <TabWrapper tabId="tab15">
+          );
+        case 'tab15':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Văn Phong + Bắt Buộc Bot char tuân thủ theo các quy định</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab16':
-        return (
-          <TabWrapper tabId="tab16">
+          );
+        case 'tab16':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Sổ Chi Tiêu</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab17':
-        return (
-          <TabWrapper tabId="tab17">
+          );
+        case 'tab17':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Phỏng Vấn và bot char trả lời</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab18':
-        return (
-          <TabWrapper tabId="tab18">
+          );
+        case 'tab18':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Livestream Tiktok</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab19':
-        return (
-          <TabWrapper tabId="tab19">
+          );
+        case 'tab19':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Weibo</h2>
             </div>
-          </TabWrapper>
-        );
-      case 'tab20':
-        return (
-          <TabWrapper tabId="tab20">
+          );
+        case 'tab20':
+          return (
             <div className="p-4">
               <h2 className="text-xl font-bold text-[#8A7D85]">Hội Anti fan và Fan Cuồng</h2>
             </div>
-          </TabWrapper>
-        );
-      default:
-        return null;
-    }
+          );
+        default:
+          return null;
+      }
+    })();
+
+    return (
+      <TabWrapper bg={bg} onBgUpload={handleBgUpload}>
+        {content}
+      </TabWrapper>
+    );
   };
 
   const tabs = [
@@ -610,19 +654,37 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="w-full h-screen flex flex-col font-sans overflow-hidden bg-[#FAF9F6] relative">
-      <div className="absolute top-4 left-4 z-50">
-        <button onClick={onBack} className="bg-white/80 backdrop-blur px-3 py-1 rounded-full text-sm font-bold text-[#F3B4C2] shadow-sm border border-[#F9C6D4]">
+      <div className="absolute top-4 left-4 z-50 flex items-center gap-2">
+        <button onClick={onBack} className="bg-white/80 px-3 py-1 rounded-full text-sm font-bold text-[#F3B4C2] shadow-sm border border-[#F9C6D4] hover:bg-white transition-all">
           ← Thoát
         </button>
+        
+        {/* Global Character Selector */}
+        <div className="flex items-center gap-1 bg-white/80 border border-[#F9C6D4] rounded-full px-2 py-1 shadow-sm overflow-hidden max-w-[200px] md:max-w-[400px]">
+          <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+            {characters.map(char => (
+              <button
+                key={char.id}
+                onClick={() => setActiveCharacterId(char.id)}
+                className={`px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition-all border ${
+                  activeCharacterId === char.id 
+                    ? 'bg-[#F9DDE3] text-[#8A7D85] border-[#F3C6D1] shadow-sm' 
+                    : 'bg-[#FEF9E7] text-[#8A7D85] border-[#F9E79F] hover:bg-[#FFF9C4]'
+                }`}
+              >
+                {char.name}
+              </button>
+            ))}
+          </div>
+          <button 
+            onClick={handleCreateCharacter}
+            className="p-1 text-[#F3B4C2] hover:bg-[#FDF2F5] rounded-full transition-all"
+            title="Thêm nhân vật mới"
+          >
+            <Plus size={16} />
+          </button>
+        </div>
       </div>
-
-      <input 
-        type="file" 
-        accept="image/*" 
-        className="hidden" 
-        ref={bgInputRef} 
-        onChange={handleBgUpload} 
-      />
 
       <div className="flex-1 overflow-hidden pb-[80px]">
         {renderTabContent()}
@@ -645,6 +707,14 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
           ))}
         </div>
       </div>
+
+      {/* Global Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-10 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-md border border-[#F9DDE3] text-[#8A7D85] px-6 py-3 rounded-full shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-4 z-[100]">
+          <div className="w-2 h-2 rounded-full bg-[#4CAF50]"></div>
+          <span className="font-medium">{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,25 +1,40 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Image as ImageIcon } from 'lucide-react';
+import { saveToDB, getFromDB } from '../utils/indexedDB';
+import { compressImage } from '../utils/imageUtils';
 
 export default function PasscodeScreen({ onSuccess, onCancel }: { onSuccess: () => void, onCancel: () => void }) {
   const [code, setCode] = useState('');
-  const [appBackground, setAppBackground] = useState(() => localStorage.getItem('passcode_bg') || '');
-  const bgInputRef = useRef<HTMLInputElement>(null);
+  const [appBackground, setAppBackground] = useState('');
   const CORRECT_CODE = '1234';
 
   useEffect(() => {
-    localStorage.setItem('passcode_bg', appBackground);
-  }, [appBackground]);
+    const loadBg = async () => {
+      const saved = await getFromDB('backgrounds', 'passcode_bg');
+      if (saved) setAppBackground(saved);
+      else {
+        const legacy = localStorage.getItem('passcode_bg');
+        if (legacy) {
+          setAppBackground(legacy);
+          await saveToDB('backgrounds', 'passcode_bg', legacy);
+          localStorage.removeItem('passcode_bg');
+        }
+      }
+    };
+    loadBg();
+  }, []);
 
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAppBackground(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 3840, 2160, 0.9);
+        setAppBackground(compressed);
+        await saveToDB('backgrounds', 'passcode_bg', compressed);
+      } catch (error) {
+        console.error("Failed to upload passcode background", error);
+      }
     }
   };
 
@@ -50,20 +65,18 @@ export default function PasscodeScreen({ onSuccess, onCancel }: { onSuccess: () 
 
       {/* Top Bar for Background Upload */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-end z-20 pt-safe">
-        <input 
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          ref={bgInputRef} 
-          onChange={handleBgUpload} 
-        />
-        <button 
-          onClick={() => bgInputRef.current?.click()}
+        <label 
           className="text-[12px] px-3 py-1.5 rounded-full bg-white/50 backdrop-blur-md border border-white/40 shadow-sm flex items-center gap-1.5 cursor-pointer hover:bg-white/70 transition-colors text-gray-700 font-medium"
         >
           <ImageIcon size={14} />
           Đổi nền
-        </button>
+          <input 
+            type="file" 
+            accept="image/*" 
+            className="hidden" 
+            onChange={handleBgUpload} 
+          />
+        </label>
       </div>
 
       <div className="relative z-10 flex flex-col items-center">

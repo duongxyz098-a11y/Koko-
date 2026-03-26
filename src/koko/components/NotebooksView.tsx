@@ -159,13 +159,11 @@ export default function NotebooksView({ char, onBack }: { char: any, onBack: () 
               <img 
                 src={covers[nb.id] || char.avatar || 'https://i.pinimg.com/236x/01/a9/4b/01a94b465b8df4d9d10e5bd7875955a0.jpg'} 
                 className="absolute inset-0 w-full h-full object-cover"
-                style={{ filter: 'contrast(75%) brightness(115%) saturate(85%) sepia(15%) blur(0.5px)' }}
                 alt="Notebook Cover"
               />
               
-              {/* Layer 2: Color Overlay (Sương Mờ) - Pinkish/Milky White */}
-              <div className="absolute inset-0 bg-gradient-to-tr from-[#FFC0CB]/40 to-[#E0FFFF]/30 mix-blend-overlay pointer-events-none"></div>
-              <div className="absolute inset-0 bg-white/20 backdrop-blur-[1px] pointer-events-none"></div>
+              {/* Layer 2: Subtle Overlay */}
+              <div className="absolute inset-0 bg-white/10 pointer-events-none"></div>
               
               {/* Layer 3: CSS Lace Frame (Khung Viền Ren) */}
               <div className="absolute inset-3 border-2 border-dashed border-white/60 rounded-xl pointer-events-none"></div>

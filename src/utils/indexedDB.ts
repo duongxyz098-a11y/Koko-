@@ -1,12 +1,15 @@
 export const initKeyValueDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('BanhNhoKV', 1);
+    const request = indexedDB.open('BanhNhoKV', 3);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
     request.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains('backgrounds')) {
         db.createObjectStore('backgrounds');
+      }
+      if (!db.objectStoreNames.contains('profile_photos')) {
+        db.createObjectStore('profile_photos');
       }
     };
   });

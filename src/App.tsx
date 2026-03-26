@@ -25,9 +25,10 @@ import RenGram from './components/RenGram';
 import KokoApp from './koko/KokoApp';
 import UserProfileTab from './koko/components/UserProfileTab';
 import BanhNhoChatApp from './components/BanhNhoChatApp';
+import CarrdProfile from './components/CarrdProfile';
 
 export default function App() {
-  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating' | 'youtube' | 'loveshow' | 'novel' | 'kikokonovel' | 'rengram' | 'kokoroleplay' | 'userprofile' | 'banhnho'>('lock');
+  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating' | 'youtube' | 'loveshow' | 'novel' | 'kikokonovel' | 'rengram' | 'kokoroleplay' | 'userprofile' | 'banhnho' | 'carrd'>('lock');
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<ApiSettingsData>(() => {
     const saved = localStorage.getItem('kotokoo_settings');
@@ -70,6 +71,7 @@ export default function App() {
               openKokoRoleplay={() => setScreen('kokoroleplay')}
               openUserProfile={() => setScreen('userprofile')}
               openBanhNho={() => setScreen('banhnho')}
+              openCarrd={() => setScreen('carrd')}
             />
           )}
           {screen === 'koko' && (
@@ -98,11 +100,26 @@ export default function App() {
           )}
           {screen === 'userprofile' && (
             <div className="absolute inset-0 bg-transparent z-50">
-              <UserProfileTab key="userprofile" onBack={() => setScreen('home')} />
+              <UserProfileTab 
+                key="userprofile" 
+                onBack={() => setScreen('home')} 
+                onBgUpload={async () => {}} 
+                bgInputRef={{ current: null }} 
+              />
             </div>
           )}
           {screen === 'banhnho' && (
             <BanhNhoChatApp key="banhnho" onBack={() => setScreen('home')} />
+          )}
+          {screen === 'carrd' && (
+            <div className="absolute inset-0 z-50 overflow-y-auto heart-pattern">
+              <div className="absolute top-4 left-4 z-[60]">
+                <button onClick={() => setScreen('home')} className="bg-white/80 backdrop-blur px-3 py-1 rounded-full text-sm font-bold text-[#F3B4C2] shadow-sm border border-[#F9C6D4]">
+                  ← Thoát
+                </button>
+              </div>
+              <CarrdProfile />
+            </div>
           )}
         </AnimatePresence>
       </ErrorBoundary>

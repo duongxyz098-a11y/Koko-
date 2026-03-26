@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Heart, MessageCircle, User, Dices, Sparkles, ChevronLeft, ChevronRight, Briefcase, Upload, Image as ImageIcon, Send, Settings, RefreshCw, Trash2, Plus, Users, Loader2, Download, Check, Save } from 'lucide-react';
-import { sendCoreMessage, KokoPrompt, ChatMessage } from '../services/coreAi';
+import { sendCoreMessage, sendCoreMessageStream, KokoPrompt, ChatMessage } from '../services/coreAi';
 import { generateNPCs, generateNPCResponse, extractJSON } from '../services/geminiService';
+import { saveToDB, getFromDB } from '../utils/indexedDB';
+import { compressImage } from '../utils/imageUtils';
 
 const personalities = [
   { group: "Tư Duy & Phân Tích", items: ["Tư duy logic", "Phân tích sâu", "Lý trí", "Chiến lược", "Sáng tạo", "Độc đáo", "Trực giác", "Tò mò", "Nghiên cứu", "Khoa học", "Tư duy phản biện", "Tập trung cao", "Khách quan", "Tổng quan", "Chi tiết", "Thực tế", "Thực dụng", "Hiện đại", "Đổi mới", "Trải nghiệm"] },
@@ -196,6 +198,21 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   const [appBackground, setAppBackground] = useState(currentProfile.appBackground);
   const [profileBackground, setProfileBackground] = useState(currentProfile.profileBackground);
   const [userAvatar, setUserAvatar] = useState(currentProfile.avatar);
+  
+  // Load backgrounds from IndexedDB for current profile
+  useEffect(() => {
+    const loadBgs = async () => {
+      const bg = await getFromDB('backgrounds', `dating_bg_${currentProfileId}`);
+      if (bg) setAppBackground(bg);
+      
+      const pbg = await getFromDB('backgrounds', `dating_profile_bg_${currentProfileId}`);
+      if (pbg) setProfileBackground(pbg);
+      
+      const cbg = await getFromDB('backgrounds', `dating_chat_bg_${currentProfileId}`);
+      if (cbg) setChatBackground(cbg);
+    };
+    loadBgs();
+  }, [currentProfileId]);
   const [npcPosts, setNpcPosts] = useState<any[]>([]);
   const [followerCount, setFollowerCount] = useState(1100);
   const [loadingMsg, setLoadingMsg] = useState('');
@@ -269,7 +286,6 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     }
   });
   
-  const bgInputRef = useRef<HTMLInputElement>(null);
   const profileBgInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const npcImageInputRef = useRef<HTMLInputElement>(null);
@@ -281,8 +297,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   const allNpcImages = [...npcImageLinks, ...npcUploadedImages];
 
   useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 800);
-    return () => clearTimeout(timer);
+    setShowSplash(false);
   }, []);
 
   useEffect(() => {
@@ -397,9 +412,10 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     showToast('Đã đổi tên tài khoản');
   };
 
-  useEffect(() => {
-    loadMoreNpcPosts(10);
-  }, []);
+  // Removed automatic loading on mount
+  // useEffect(() => {
+  //   loadMoreNpcPosts(10);
+  // }, []);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -412,14 +428,18 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     setTimeout(() => setLoadingMsg(''), 2000);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: (val: string) => void) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, setter: (val: string) => void, dbKey?: string) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setter(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const compressed = await compressImage(file, 3840, 2160, 0.9);
+        setter(compressed);
+        if (dbKey) {
+          await saveToDB('backgrounds', dbKey, compressed);
+        }
+      } catch (error) {
+        console.error("Failed to upload image", error);
+      }
     }
   };
 
@@ -624,7 +644,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     
     try {
       // Batching for large counts to ensure quality and avoid token limits
-      const batchSize = 10;
+      const batchSize = 5;
       const totalBatches = Math.ceil(count / batchSize);
       
       for (let b = 0; b < totalBatches; b++) {
@@ -638,54 +658,71 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         YÊU CẦU CỰC KỲ QUAN TRỌNG: 
         1. Mỗi nội dung bài viết PHẢI DÀI TRÊN 500 KÝ TỰ. 
         2. Nội dung phải sâu sắc, thu hút, tự nhiên và mang đậm cá tính riêng.
-        3. TRẢ VỀ MẢNG JSON CỦA CÁC OBJECT: [{"name": "Tên NPC", "content": "Nội dung bài viết"}, ... ]. 
-        KHÔNG GIẢI THÍCH, KHÔNG SUY NGHĨ (THINKING), KHÔNG MARKDOWN, KHÔNG CÓ BẤT KỲ CHỮ NÀO KHÁC NGOÀI JSON.`;
+        3. TRẢ VỀ DANH SÁCH CÁC OBJECT JSON, MỖI OBJECT TRÊN MỘT DÒNG, ĐƯỢC PHÂN CÁCH BỞI DẤU XUỐNG DÒNG. VÍ DỤ: 
+        {"name": "Tên NPC", "content": "Nội dung bài viết"}
+        {"name": "Tên NPC", "content": "Nội dung bài viết"}
+        4. BẮT BUỘC: Đảm bảo JSON hợp lệ, không bị cắt cụt.
+        5. KHÔNG GIẢI THÍCH, KHÔNG SUY NGHĨ (THINKING), KHÔNG MARKDOWN, KHÔNG CÓ BẤT KỲ CHỮ NÀO KHÁC NGOÀI JSON.`;
 
         const koko: KokoPrompt = {
           title: "Người dùng Sách Thế Giới",
           context: `Bạn đang tạo ${currentBatchCount} bài đăng chất lượng cao cho các NPC trên ứng dụng hẹn hò Sách Thế Giới.`,
-          rules: "BẮT BUỘC viết bài đăng dài trên 500 ký tự cho mỗi NPC. Trả về mảng JSON.",
+          rules: "BẮT BUỘC viết bài đăng dài trên 500 ký tự cho mỗi NPC. Trả về JSON trên từng dòng.",
           length: `Mỗi bài đăng tối thiểu 500 ký tự.`,
           ooc: "Không OOC."
         };
 
+        const chatSettings: any = {
+          mode: 'novel',
+          minChars: 500,
+          maxChars: 5000,
+          maxTokens: 100000 // Maximize tokens to avoid limits
+        };
+
         try {
-          const response = await sendCoreMessage(prompt, [], koko);
-          console.log(`Response for batch ${b + 1}:`, response);
+          const stream = await sendCoreMessageStream(prompt, [], koko, chatSettings);
           
-          const parsed = extractJSON(response.content);
-          console.log(`Parsed JSON for batch ${b + 1}:`, parsed);
-          if (Array.isArray(parsed)) {
-            const newPosts = parsed.map((item: any, i: number) => {
-              const name = item.name || selectedNames[i % selectedNames.length];
-              const content = item.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡';
-              
-              const avatar = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
-              const image = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
-              
-              return {
-                id: Date.now() + i + Math.random(),
-                name,
-                avatar,
-                image,
-                content: content,
-                comments: 0,
-                commentsList: []
-              };
-            });
-            setNpcPosts(prev => [...prev, ...newPosts]);
-          } else if (response.content.trim()) {
-            // Fallback if not JSON but has content
-            const fallbackPost = {
-              id: Date.now() + Math.random(),
-              name: selectedNames[0],
-              avatar: allNpcImages[0],
-              image: allNpcImages[1],
-              content: response.content.trim().substring(0, 2000),
-              comments: 0,
-              commentsList: []
-            };
-            setNpcPosts(prev => [...prev, fallbackPost]);
+          if (!stream.body) {
+            throw new Error("Phản hồi từ API không có nội dung (stream body is null).");
+          }
+
+          const reader = stream.body.getReader();
+          const decoder = new TextDecoder();
+          let accumulatedContent = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            accumulatedContent += decoder.decode(value, { stream: true });
+            
+            const lines = accumulatedContent.split('\n');
+            accumulatedContent = lines.pop() || "";
+            
+            for (const line of lines) {
+              if (line.trim().length === 0) continue;
+              try {
+                const item = JSON.parse(line.trim());
+                const name = item.name || selectedNames[Math.floor(Math.random() * selectedNames.length)];
+                const content = item.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡';
+                
+                const avatar = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
+                const image = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
+                
+                const newPost = {
+                  id: Date.now() + Math.random(),
+                  name,
+                  avatar,
+                  image,
+                  content: content,
+                  comments: 0,
+                  commentsList: []
+                };
+                setNpcPosts(prev => [...prev, newPost]);
+              } catch (e) {
+                console.error("Lỗi parse JSON dòng:", line, e);
+              }
+            }
           }
           
           // Add a small delay between batches to avoid rate limits
@@ -694,10 +731,15 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           }
         } catch (err: any) {
           console.error(`Error in batch ${b + 1}:`, err);
-          if (err.message.includes('Token') || err.message.includes('limit')) {
-            setChatLoadingMsg(`Lỗi giới hạn Token ở đợt ${b + 1}. Đang thử đợt tiếp theo...`);
-            await new Promise(r => setTimeout(r, 2000));
+          let errorMessage = err.message;
+          if (err.message === 'Failed to fetch') {
+            errorMessage = "Không thể kết nối tới API Proxy. Hãy kiểm tra lại Proxy URL trong Cài đặt và đảm bảo bạn có kết nối Internet.";
           }
+          
+          setChatLoadingMsg(`Lỗi ở đợt ${b + 1}: ${errorMessage}. Đang thử lại sau 3 giây...`);
+          await new Promise(r => setTimeout(r, 3000));
+          // Retry once
+          b--; 
         }
       }
     } catch (error) {
@@ -748,7 +790,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     if (!post) return;
 
     setIsChatLoading(true);
-    setChatLoadingMsg('Hệ thống đang gọi 300 NPC vào bình luận... ♡');
+    setChatLoadingMsg('Hệ thống đang gọi 200 NPC vào bình luận... ♡');
     
     try {
       // Add to contacts if not exists
@@ -756,13 +798,13 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         setContacts(prev => [...prev, { id: post.id, name: post.name, avatar: post.avatar, lastMessage: 'Vừa thả tim bài đăng của họ' }]);
       }
 
-      const totalComments = 300;
+      const totalComments = 200;
 
       const prompt = `Dựa trên bài đăng của ${npcName} với nội dung: "${post.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡'}", 
       hãy tạo ra ${totalComments} bình luận ngắn (dưới 15 từ), tự nhiên, đa dạng từ các NPC khác nhau. 
       Các bình luận phải thể hiện sự quan tâm, đồng cảm, khen ngợi hoặc đặt câu hỏi liên quan đến nội dung bài viết.
       Phong cách: trẻ trung, dễ thương, thả thính, khen ngợi, hoặc hỏi thăm. 
-      Yêu cầu: Trả về danh sách ${totalComments} bình luận, mỗi bình luận trên một dòng, KHÔNG đánh số, KHÔNG có ký tự đặc biệt ở đầu dòng.`;
+      Yêu cầu: Trả về danh sách ${totalComments} bình luận, mỗi bình luận trên một dòng, KHÔNG đánh số, KHÔNG có ký tự đặc biệt ở đầu dòng. KHÔNG GIẢI THÍCH.`;
 
       const koko: KokoPrompt = {
         title: 'Dating App NPC Comments Generator',
@@ -772,7 +814,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         ooc: 'Không OOC'
       };
 
-      const response = await sendCoreMessage(prompt, [], koko, {
+      const stream = await sendCoreMessageStream(prompt, [], koko, {
         mode: 'online',
         minChars: 10,
         maxChars: 100,
@@ -780,14 +822,67 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         timeoutMinutes: 5
       });
 
-      const batchComments = response.content.split('\n').filter(line => line.trim().length > 0).slice(0, totalComments);
-      
-      // Update UI incrementally
-      setNpcPosts(prev => prev.map(p => p.id === postId ? { 
-        ...p, 
-        comments: p.comments + batchComments.length,
-        commentsList: [...(p.commentsList || []), ...batchComments]
-      } : p));
+      if (!stream.body) {
+        throw new Error("Phản hồi từ API không có nội dung.");
+      }
+
+      const reader = stream.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = "";
+      let lastUpdateCount = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        accumulatedContent += decoder.decode(value, { stream: true });
+        
+        const lines = accumulatedContent.split('\n');
+        accumulatedContent = lines.pop() || "";
+        
+        const newComments = lines.filter(line => line.trim().length > 0);
+        
+        for (const line of newComments) {
+          let jsonStr = line.trim();
+          if (jsonStr.length === 0) continue;
+          
+          const item = extractJSON(jsonStr);
+          if (!item) continue;
+
+          try {
+            let content = "";
+            if (item.choices && item.choices[0] && item.choices[0].delta && item.choices[0].delta.content) {
+              content = item.choices[0].delta.content;
+            } else if (item.content) {
+              content = item.content;
+            } else {
+              continue;
+            }
+            
+            const commentLines = content.split('\n').filter(l => l.trim().length > 0);
+            
+            for (const commentContent of commentLines) {
+              const newComment = {
+                id: Math.random().toString(),
+                authorName: randomNames[Math.floor(Math.random() * randomNames.length)],
+                authorAvatar: npcImageLinks[Math.floor(Math.random() * npcImageLinks.length)],
+                content: commentContent.trim(),
+                createdAt: new Date().toISOString()
+              };
+
+              setNpcPosts(prev => prev.map(p => p.id === postId ? { 
+                ...p, 
+                comments: p.comments + 1,
+                commentsList: [...(p.commentsList || []), newComment]
+              } : p));
+            }
+            
+            setChatLoadingMsg(`Đang gọi NPC... Đã cập nhật bình luận... ♡`);
+          } catch (e) {
+            console.error("Lỗi parse JSON dòng:", jsonStr, e);
+          }
+        }
+      }
 
       setFollowedNpcs(prev => {
         if (!prev.includes(npcName)) {
@@ -896,52 +991,94 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
 
   const loadMoreNpcProfilePosts = async (npcName: string) => {
     setIsChatLoading(true);
-    setChatLoadingMsg(`Đang tạo thêm 10 bài đăng cho ${npcName}... ♡`);
+    setChatLoadingMsg(`Đang tạo 10 bài đăng cho ${npcName}... ♡`);
     
     try {
       const prompt = `Hãy viết 10 bài đăng tâm trạng hoặc chia sẻ cuộc sống cho một ứng dụng hẹn hò. 
       Nhân vật tên là ${npcName}. 
-      Yêu cầu: Mỗi nội dung phải trên 500 ký tự, sâu sắc, thu hút và tự nhiên. 
-      Trả về danh sách 10 bài đăng, phân tách các bài bằng chuỗi ký tự [POST_SEP]. 
-      Chỉ trả về nội dung các bài viết, không thêm bất kỳ lời dẫn nào khác.`;
+      Yêu cầu: Mỗi nội dung phải trên 1000 ký tự. 
+      Trả về DANH SÁCH CÁC OBJECT JSON, MỖI OBJECT TRÊN MỘT DÒNG: {"content": "Nội dung bài viết"}. 
+      KHÔNG GIẢI THÍCH, KHÔNG MARKDOWN, KHÔNG CÓ BẤT KỲ CHỮ NÀO KHÁC NGOÀI JSON.`;
 
       const koko: KokoPrompt = {
         title: "Người dùng Sách Thế Giới",
         context: `Bạn là ${npcName}, đang đăng 10 bài trên ứng dụng hẹn hò Sách Thế Giới.`,
-        rules: "Viết 10 bài đăng dài trên 500 ký tự. Phân tách các bài bằng [POST_SEP].",
-        length: "10 bài đăng.",
+        rules: "Viết 10 bài đăng dài trên 1000 ký tự. Trả về JSON trên từng dòng.",
+        length: "10 bài đăng, mỗi bài 1000 ký tự.",
         ooc: "Không OOC."
       };
 
-      const response = await sendCoreMessage(prompt, [], koko);
-      
-      const contents = response.content.split('[POST_SEP]').filter(c => c.trim().length > 0);
-      const newPosts = contents.map((content, i) => {
-        const image = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
-        return {
-          id: Date.now() + i + Math.random(),
-          image,
-          content: content.trim(),
-          date: new Date(Date.now() - i * 86400000).toLocaleDateString('vi-VN')
-        };
+      const stream = await sendCoreMessageStream(prompt, [], koko, {
+        mode: 'novel',
+        minChars: 1000,
+        maxChars: 5000,
+        maxTokens: 20000
       });
 
-      if (newPosts.length === 0 && response.content.trim()) {
-        newPosts.push({
-          id: Date.now(),
-          image: allNpcImages[0],
-          content: response.content.trim(),
-          date: new Date().toLocaleDateString('vi-VN')
-        });
+      if (!stream.body) throw new Error("Phản hồi từ API không có nội dung.");
+
+      const reader = stream.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = "";
+      const newPosts: any[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        accumulatedContent += decoder.decode(value, { stream: true });
+        const lines = accumulatedContent.split('\n');
+        accumulatedContent = lines.pop() || "";
+        
+        for (const line of lines) {
+          let jsonStr = line.trim();
+          if (jsonStr.length === 0) continue;
+          
+          const item = extractJSON(jsonStr);
+          if (!item) continue;
+
+          try {
+            // Extract content from OpenAI-like streaming format
+            let content = "";
+            if (item.choices && item.choices[0] && item.choices[0].delta && item.choices[0].delta.content) {
+              content = item.choices[0].delta.content;
+            } else if (item.content) {
+              content = item.content;
+            } else {
+              continue; // Skip if no content
+            }
+            
+            // If content is a full JSON string (as requested in prompt), parse it
+            try {
+              const parsedContent = JSON.parse(content);
+              if (parsedContent.content) {
+                const image = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
+                newPosts.push({
+                  id: Date.now() + Math.random(),
+                  image,
+                  content: parsedContent.content.trim(),
+                  date: new Date().toLocaleDateString('vi-VN')
+                });
+              }
+            } catch (e) {
+              // Not a full JSON object, maybe just partial content
+              console.debug("Partial content received, accumulating...");
+            }
+          } catch (e) {
+            console.error("Lỗi parse JSON dòng:", jsonStr, e);
+          }
+        }
       }
 
       setNpcExtraPosts(prev => ({
         ...prev,
         [npcName]: [...(prev[npcName] || []), ...newPosts]
       }));
-    } catch (error) {
-      console.error('Error loading NPC profile posts:', error);
-      showToast('Không thể kết nối với NPC lúc này.');
+      
+      showToast(`Đã tạo xong 10 bài đăng cho ${npcName} ♡`);
+    } catch (error: any) {
+      console.error('Error generating profile posts:', error);
+      showToast('Không thể tạo bài đăng lúc này, thử lại sau nhé ♡');
     } finally {
       setIsChatLoading(false);
     }
@@ -2000,9 +2137,10 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         className="absolute inset-0 w-full h-full bg-[#FAF9F6] overflow-hidden font-sans flex flex-col z-50 bg-cover bg-center"
         style={{ backgroundImage: appBackground ? `url('${appBackground}')` : 'none' }}
       >
-      <input type="file" accept="image/*" className="hidden" ref={bgInputRef} onChange={e => handleImageUpload(e, setAppBackground)} />
-      <input type="file" accept="image/*" className="hidden" ref={profileBgInputRef} onChange={e => handleImageUpload(e, setProfileBackground)} />
+      {/* Hidden file inputs replaced by labels where possible */}
       <input type="file" accept="image/*" className="hidden" ref={avatarInputRef} onChange={e => handleImageUpload(e, setUserAvatar)} />
+      <input type="file" accept="image/*" className="hidden" ref={npcImageInputRef} onChange={handleNpcImageUpload} />
+      <input type="file" accept="image/*" className="hidden" ref={userPostImageInputRef} onChange={e => handleImageUpload(e, setNewPostImage)} />
       <input type="file" accept="image/*" className="hidden" ref={npcCustomAvatarInputRef} onChange={handleNpcCustomAvatarUpload} />
       <input type="file" accept="image/*" className="hidden" ref={npcCustomBgInputRef} onChange={handleNpcCustomBgUpload} />
 
@@ -2027,9 +2165,10 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           <ChevronLeft size={24} />
         </button>
         <span className="text-lg font-semibold">Dating Hẹn Hò</span>
-        <button onClick={() => bgInputRef.current?.click()} className="p-2 hover:bg-black/5 rounded-full transition-colors">
+        <label className="p-2 hover:bg-black/5 rounded-full transition-colors cursor-pointer flex items-center justify-center">
           <ImageIcon size={20} />
-        </button>
+          <input type="file" accept="image/*" className="hidden" onChange={e => handleImageUpload(e, setAppBackground, `dating_bg_${currentProfileId}`)} />
+        </label>
       </div>
 
       {/* Main Content */}
