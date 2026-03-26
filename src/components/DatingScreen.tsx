@@ -158,16 +158,39 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   });
 
   useEffect(() => {
-    localStorage.setItem('api_key', userApiKey);
-    localStorage.setItem('api_url', userApiUrl);
-    localStorage.setItem('model_name', userModelName);
-    
-    // Also sync with kotokoo_settings for global compatibility
-    const settings = { endpoint: userApiUrl, apiKey: userApiKey, model: userModelName };
-    localStorage.setItem('kotokoo_settings', JSON.stringify(settings));
+    try {
+      localStorage.setItem('api_key', userApiKey);
+      localStorage.setItem('api_url', userApiUrl);
+      localStorage.setItem('model_name', userModelName);
+      
+      // Also sync with kotokoo_settings for global compatibility
+      const settings = { endpoint: userApiUrl, apiKey: userApiKey, model: userModelName };
+      localStorage.setItem('kotokoo_settings', JSON.stringify(settings));
+    } catch (e) {
+      console.error('Failed to save API settings to localStorage:', e);
+    }
   }, [userApiKey, userApiUrl, userModelName]);
 
-  const currentProfile = profiles.find(p => p.id === currentProfileId) || profiles[0];
+  const currentProfile = profiles.find(p => p.id === currentProfileId) || profiles[0] || {
+    id: 'default',
+    name: 'Người dùng mới',
+    avatar: npcImageLinks[0],
+    preferences: { age: [], personality: [], gender: [], hobbies: [], career: [] },
+    npcPreferences: { age: [], personality: [], gender: [], hobbies: [], career: [] },
+    followedNpcs: [],
+    chatMessages: {},
+    contacts: [],
+    userPosts: [],
+    appBackground: '',
+    profileBackground: '',
+    chatBackground: '',
+    avatarBg: '#F3B4C2',
+    npcCustomAvatars: {},
+    npcCustomBgs: {},
+    chatMode: 'online',
+    novelMinChars: 500,
+    novelMaxChars: 2000
+  };
 
   const [activeTab, setActiveTab] = useState<'onboarding' | 'npc_settings' | 'feed' | 'random' | 'inbox' | 'profile'>('onboarding');
   const [appBackground, setAppBackground] = useState(currentProfile.appBackground);
@@ -263,8 +286,12 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('dating_profiles', JSON.stringify(profiles));
-    localStorage.setItem('dating_current_profile_id', currentProfileId);
+    try {
+      localStorage.setItem('dating_profiles', JSON.stringify(profiles));
+      localStorage.setItem('dating_current_profile_id', currentProfileId);
+    } catch (e) {
+      console.error('Failed to save dating profiles to localStorage:', e);
+    }
   }, [profiles, currentProfileId]);
 
   // Sync current profile changes back to profiles array
@@ -468,12 +495,13 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       );
       
       if (chatMode === 'online') {
-        const bubbles = response.split(/\n+/).filter(b => b.trim().length > 0);
+        const bubbles = response.content.split(/\n+/).filter(b => b.trim().length > 0);
         let finalBubbles = bubbles;
         if (bubbles.length === 1 && bubbles[0].length > 100) {
           finalBubbles = bubbles[0].split(/(?<=[.!?])\s+/).filter(b => b.trim().length > 0);
         }
         const limitedBubbles = finalBubbles.slice(0, 20);
+        const finalContent = response.content;
 
         setChatMessages(prev => {
           const newHistory = [...(prev[chatId] || [])];
@@ -558,7 +586,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       );
       
       if (chatMode === 'online') {
-        const bubbles = response.split('\n').filter(b => b.trim().length > 0).slice(0, 20);
+        const bubbles = response.content.split('\n').filter(b => b.trim().length > 0).slice(0, 20);
         setChatMessages(prev => ({
           ...prev,
           [chatId]: [...(prev[chatId] || []), ...bubbles.map(b => ({ role: 'assistant' as const, content: b }))]
@@ -625,7 +653,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           const response = await sendCoreMessage(prompt, [], koko);
           console.log(`Response for batch ${b + 1}:`, response);
           
-          const parsed = extractJSON(response);
+          const parsed = extractJSON(response.content);
           console.log(`Parsed JSON for batch ${b + 1}:`, parsed);
           if (Array.isArray(parsed)) {
             const newPosts = parsed.map((item: any, i: number) => {
@@ -646,14 +674,14 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
               };
             });
             setNpcPosts(prev => [...prev, ...newPosts]);
-          } else if (response.trim()) {
+          } else if (response.content.trim()) {
             // Fallback if not JSON but has content
             const fallbackPost = {
               id: Date.now() + Math.random(),
               name: selectedNames[0],
               avatar: allNpcImages[0],
               image: allNpcImages[1],
-              content: response.trim().substring(0, 2000),
+              content: response.content.trim().substring(0, 2000),
               comments: 0,
               commentsList: []
             };
@@ -720,7 +748,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     if (!post) return;
 
     setIsChatLoading(true);
-    setChatLoadingMsg('Hệ thống đang gọi 100 NPC vào bình luận... ♡');
+    setChatLoadingMsg('Hệ thống đang gọi 300 NPC vào bình luận... ♡');
     
     try {
       // Add to contacts if not exists
@@ -728,51 +756,38 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         setContacts(prev => [...prev, { id: post.id, name: post.name, avatar: post.avatar, lastMessage: 'Vừa thả tim bài đăng của họ' }]);
       }
 
-      const totalComments = 100;
-      const batchSize = 20;
-      const totalBatches = Math.ceil(totalComments / batchSize);
-      let allComments: string[] = [];
+      const totalComments = 300;
 
-      for (let b = 0; b < totalBatches; b++) {
-        const currentBatchCount = Math.min(batchSize, totalComments - allComments.length);
-        setChatLoadingMsg(`Đang tạo bình luận đợt ${b + 1}/${totalBatches}... ♡`);
+      const prompt = `Dựa trên bài đăng của ${npcName} với nội dung: "${post.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡'}", 
+      hãy tạo ra ${totalComments} bình luận ngắn (dưới 15 từ), tự nhiên, đa dạng từ các NPC khác nhau. 
+      Các bình luận phải thể hiện sự quan tâm, đồng cảm, khen ngợi hoặc đặt câu hỏi liên quan đến nội dung bài viết.
+      Phong cách: trẻ trung, dễ thương, thả thính, khen ngợi, hoặc hỏi thăm. 
+      Yêu cầu: Trả về danh sách ${totalComments} bình luận, mỗi bình luận trên một dòng, KHÔNG đánh số, KHÔNG có ký tự đặc biệt ở đầu dòng.`;
 
-        const prompt = `Dựa trên bài đăng của ${npcName} với nội dung: "${post.content || 'Đang lướt app Sách Thế Giới tìm bạn... ♡'}", 
-        hãy tạo ra ${currentBatchCount} bình luận ngắn (dưới 15 từ), tự nhiên, đa dạng từ các NPC khác nhau. 
-        Các bình luận phải thể hiện sự quan tâm, đồng cảm, khen ngợi hoặc đặt câu hỏi liên quan đến nội dung bài viết.
-        Phong cách: trẻ trung, dễ thương, thả thính, khen ngợi, hoặc hỏi thăm. 
-        Yêu cầu: Trả về danh sách ${currentBatchCount} bình luận, mỗi bình luận trên một dòng, KHÔNG đánh số, KHÔNG có ký tự đặc biệt ở đầu dòng.`;
+      const koko: KokoPrompt = {
+        title: 'Dating App NPC Comments Generator',
+        context: `Bạn là một hệ thống tạo bình luận tự động cho mạng xã hội hẹn hò. Bạn đang tạo bình luận cho bài đăng của ${npcName}.`,
+        rules: `Tạo ${totalComments} bình luận ngắn, mỗi bình luận một dòng. Không đánh số. Không có ký tự đặc biệt ở đầu.`,
+        length: `${totalComments} dòng`,
+        ooc: 'Không OOC'
+      };
 
-        const koko: KokoPrompt = {
-          title: 'Dating App NPC Comments Generator',
-          context: `Bạn là một hệ thống tạo bình luận tự động cho mạng xã hội hẹn hò. Bạn đang tạo bình luận đợt ${b + 1} cho bài đăng của ${npcName}.`,
-          rules: `Tạo ${currentBatchCount} bình luận ngắn, mỗi bình luận một dòng. Không đánh số. Không có ký tự đặc biệt ở đầu.`,
-          length: `${currentBatchCount} dòng`,
-          ooc: 'Không OOC'
-        };
+      const response = await sendCoreMessage(prompt, [], koko, {
+        mode: 'online',
+        minChars: 10,
+        maxChars: 100,
+        maxTokens: 50000,
+        timeoutMinutes: 5
+      });
 
-        try {
-          const response = await sendCoreMessage(prompt, [], koko, {
-            mode: 'online',
-            minChars: 10,
-            maxChars: 100
-          });
-
-          const batchComments = response.split('\n').filter(line => line.trim().length > 0).slice(0, currentBatchCount);
-          allComments = [...allComments, ...batchComments];
-          
-          // Update UI incrementally
-          setNpcPosts(prev => prev.map(p => p.id === postId ? { 
-            ...p, 
-            comments: p.comments + batchComments.length,
-            commentsList: [...(p.commentsList || []), ...batchComments]
-          } : p));
-
-          if (b < totalBatches - 1) await new Promise(r => setTimeout(r, 800));
-        } catch (err) {
-          console.error(`Error in comment batch ${b + 1}:`, err);
-        }
-      }
+      const batchComments = response.content.split('\n').filter(line => line.trim().length > 0).slice(0, totalComments);
+      
+      // Update UI incrementally
+      setNpcPosts(prev => prev.map(p => p.id === postId ? { 
+        ...p, 
+        comments: p.comments + batchComments.length,
+        commentsList: [...(p.commentsList || []), ...batchComments]
+      } : p));
 
       setFollowedNpcs(prev => {
         if (!prev.includes(npcName)) {
@@ -815,66 +830,49 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     if (!post) return;
 
     setIsChatLoading(true);
-    setChatLoadingMsg('Hệ thống đang gọi 100 NPC vào bình luận... ♡');
+    setChatLoadingMsg('Hệ thống đang gọi 300 NPC vào bình luận... ♡');
 
     try {
-      const totalComments = 100;
-      const batchSize = 20;
-      const totalBatches = Math.ceil(totalComments / batchSize);
-      
-      for (let b = 0; b < totalBatches; b++) {
-        const currentBatchCount = Math.min(batchSize, totalComments - (b * batchSize));
-        setChatLoadingMsg(`Đang tạo bình luận đợt ${b + 1}/${totalBatches}... ♡`);
+      const totalComments = 300;
 
-        const relatedNpcs = Array.from({ length: currentBatchCount }).map((_, i) => ({
-          name: randomNames[Math.floor(Math.random() * randomNames.length)],
-          avatar: npcImageLinks[Math.floor(Math.random() * npcImageLinks.length)]
-        }));
-        
-        const prompt = `Người dùng vừa đăng một bài viết với nội dung: "${post.content}". 
-        Hãy tạo ra ${currentBatchCount} bình luận từ các NPC khác nhau. 
-        Mỗi NPC nên có một bình luận riêng biệt, tự nhiên, thể hiện tính cách của họ.
-        Yêu cầu: Trả về danh sách ${currentBatchCount} bình luận theo định dạng: Tên NPC | Nội dung bình luận. 
-        Mỗi bình luận trên một dòng. Không đánh số.`;
+      const prompt = `Người dùng vừa đăng một bài viết với nội dung: "${post.content}". 
+      Hãy tạo ra ${totalComments} bình luận từ các NPC khác nhau. 
+      Mỗi NPC nên có một bình luận riêng biệt, tự nhiên, thể hiện tính cách của họ.
+      Yêu cầu: Trả về danh sách ${totalComments} bình luận theo định dạng: Tên NPC | Nội dung bình luận. 
+      Mỗi bình luận trên một dòng. Không đánh số.`;
 
-        const koko: KokoPrompt = {
-          title: 'User Post NPC Comments Generator',
-          context: `Bạn là một hệ thống tạo bình luận từ NPC cho bài đăng của người dùng. Đợt ${b + 1}.`,
-          rules: `Tạo ${currentBatchCount} bình luận từ danh sách NPC. Định dạng: Tên NPC | Nội dung. Mỗi dòng một bình luận.`,
-          length: `${currentBatchCount} dòng`,
-          ooc: 'Không OOC'
+      const koko: KokoPrompt = {
+        title: 'User Post NPC Comments Generator',
+        context: `Bạn là một hệ thống tạo bình luận từ NPC cho bài đăng của người dùng.`,
+        rules: `Tạo ${totalComments} bình luận từ danh sách NPC. Định dạng: Tên NPC | Nội dung. Mỗi dòng một bình luận.`,
+        length: `${totalComments} dòng`,
+        ooc: 'Không OOC'
+      };
+
+      const response = await sendCoreMessage(prompt, [], koko, {
+        mode: 'online',
+        minChars: 10,
+        maxChars: 100,
+        maxTokens: 50000,
+        timeoutMinutes: 5
+      });
+
+      const lines = response.content.split('\n').filter(line => line.includes('|')).slice(0, totalComments);
+      const batchComments = lines.map((line, i) => {
+        const [name, content] = line.split('|').map(s => s.trim());
+        return {
+          id: Math.random().toString(),
+          authorName: name || randomNames[Math.floor(Math.random() * randomNames.length)],
+          authorAvatar: npcImageLinks[Math.floor(Math.random() * npcImageLinks.length)],
+          content: content || 'Bài viết hay quá! ♡',
+          createdAt: new Date().toISOString()
         };
+      });
 
-        try {
-          const response = await sendCoreMessage(prompt, [], koko, {
-            mode: 'online',
-            minChars: 10,
-            maxChars: 100
-          });
-
-          const lines = response.split('\n').filter(line => line.includes('|')).slice(0, currentBatchCount);
-          const batchComments = lines.map((line, i) => {
-            const [name, content] = line.split('|').map(s => s.trim());
-            const npc = relatedNpcs[i % relatedNpcs.length];
-            return {
-              id: Math.random().toString(),
-              authorName: name || npc.name,
-              authorAvatar: npc.avatar,
-              content: content || 'Bài viết hay quá! ♡',
-              createdAt: new Date().toISOString()
-            };
-          });
-
-          setUserPosts(prev => prev.map(p => p.id === postId ? {
-            ...p,
-            comments: [...p.comments, ...batchComments]
-          } : p));
-
-          if (b < totalBatches - 1) await new Promise(r => setTimeout(r, 800));
-        } catch (err) {
-          console.error(`Error in user post comment batch ${b + 1}:`, err);
-        }
-      }
+      setUserPosts(prev => prev.map(p => p.id === postId ? {
+        ...p,
+        comments: [...p.comments, ...batchComments]
+      } : p));
 
       showToast(`Đã có thêm NPC bình luận bài của bạn ♡`);
     } catch (error) {
@@ -917,7 +915,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
 
       const response = await sendCoreMessage(prompt, [], koko);
       
-      const contents = response.split('[POST_SEP]').filter(c => c.trim().length > 0);
+      const contents = response.content.split('[POST_SEP]').filter(c => c.trim().length > 0);
       const newPosts = contents.map((content, i) => {
         const image = allNpcImages[Math.floor(Math.random() * allNpcImages.length)];
         return {
@@ -928,11 +926,11 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         };
       });
 
-      if (newPosts.length === 0 && response.trim()) {
+      if (newPosts.length === 0 && response.content.trim()) {
         newPosts.push({
           id: Date.now(),
           image: allNpcImages[0],
-          content: response.trim(),
+          content: response.content.trim(),
           date: new Date().toLocaleDateString('vi-VN')
         });
       }
@@ -1247,7 +1245,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
             chatMode: chatMode
           }
         );
-        const newMsg: ChatMessage = { role: 'assistant', content: greeting };
+        const newMsg: ChatMessage = { role: 'assistant', content: greeting.content };
         setChatMessages(prev => ({
           ...prev,
           [npcId]: [newMsg]

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera, Heart, Tv, BookOpen } from 'lucide-react';
+import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera, Heart, Tv, BookOpen, Sparkles } from 'lucide-react';
 
 const pages = [0, 1, 2];
 
-export default function HomeScreen({ openSettings, openKoko, openDating, openYouTube, openLoveShow, openNovel, openRenGram }: { openSettings: () => void, openKoko: () => void, openDating: () => void, openYouTube: () => void, openLoveShow: () => void, openNovel: () => void, openRenGram: () => void }) {
+export default function HomeScreen({ openSettings, openKoko, openDating, openYouTube, openLoveShow, openNovel, openKikokoNovel, openRenGram, openKokoRoleplay, openUserProfile, openBanhNho }: { openSettings: () => void, openKoko: () => void, openDating: () => void, openYouTube: () => void, openLoveShow: () => void, openNovel: () => void, openKikokoNovel: () => void, openRenGram: () => void, openKokoRoleplay: () => void, openUserProfile: () => void, openBanhNho: () => void }) {
   const [currentPage, setCurrentPage] = useState(0);
   const [appBackground, setAppBackground] = useState(() => localStorage.getItem('home_bg') || '');
   const bgInputRef = useRef<HTMLInputElement>(null);
@@ -110,18 +110,32 @@ export default function HomeScreen({ openSettings, openKoko, openDating, openYou
                   <span className="text-[11px] font-medium text-gray-700">Love Show</span>
                 </div>
 
-                <div className="flex flex-col items-center gap-1" onClick={openNovel}>
-                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
-                    <BookOpen size={32} />
-                  </div>
-                  <span className="text-[11px] font-medium text-gray-700">Novel</span>
-                </div>
-
                 <div className="flex flex-col items-center gap-1" onClick={openRenGram}>
                   <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
                     <Camera size={32} />
                   </div>
                   <span className="text-[11px] font-medium text-gray-700">RenGram</span>
+                </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openKokoRoleplay}>
+                  <div className="w-[60px] h-[60px] bg-gradient-to-br from-[#F9C6D4] to-[#F3B4C2] rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-white cursor-pointer active:scale-95 transition-transform">
+                    <Sparkles size={32} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700 whitespace-nowrap">Roleplay Koko</span>
+                </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openUserProfile}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-instagram"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700 whitespace-nowrap">Hồ sơ User</span>
+                </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openKikokoNovel}>
+                  <div className="w-[60px] h-[60px] bg-gradient-to-br from-[#F9C6D4] to-[#EACFD5] rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-white cursor-pointer active:scale-95 transition-transform">
+                    <BookOpen size={32} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">Kikoko Novel</span>
                 </div>
 
                 {/* Widget 2x2 */}
@@ -134,7 +148,21 @@ export default function HomeScreen({ openSettings, openKoko, openDating, openYou
               </div>
             )}
             {page === 1 && (
-              <div className="flex items-center justify-center h-full text-gray-400">Trang 2</div>
+              <div className="grid grid-cols-4 gap-x-4 gap-y-6 max-w-md mx-auto">
+                <div className="flex flex-col items-center gap-1" onClick={openNovel}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-[#F3B4C2] cursor-pointer active:scale-95 transition-transform">
+                    <BookOpen size={32} />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700">Novel</span>
+                </div>
+                
+                <div className="flex flex-col items-center gap-1" onClick={openBanhNho}>
+                  <div className="w-[60px] h-[60px] bg-white rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center cursor-pointer active:scale-95 transition-transform overflow-hidden p-1">
+                    <img src="https://i.postimg.cc/yNkB85Dd/662847c19c8cd32d8ffaea098e8d03f2-(1).png" className="w-full h-full object-cover rounded-xl" />
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700 text-center leading-tight">Bánh nhỏ<br/>Trò chuyện</span>
+                </div>
+              </div>
             )}
             {page === 2 && (
               <div className="flex items-center justify-center h-full text-gray-400">Trang 3</div>

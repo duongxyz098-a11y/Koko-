@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Heart, MessageCircle, User, Home, Users, PenTool, Plus, Cat, Image as ImageIcon, Settings, ChevronRight, X, HelpCircle, RefreshCw } from 'lucide-react';
+import { Camera, Heart, MessageCircle, User, Home, Users, PenTool, Plus, Cat, Image as ImageIcon, Settings, ChevronRight, X, HelpCircle, RefreshCw, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const IMAGES = [
@@ -145,6 +145,9 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
       if (timeoutId) clearTimeout(timeoutId);
 
       if (!response.ok) {
+        if (response.status === 429) {
+          throw new Error("API Error: 429 (Too Many Requests). Vui lòng đợi một chút rồi thử lại.");
+        }
         throw new Error(`API Error: ${response.status}`);
       }
 
@@ -356,7 +359,17 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
   // Profile States
   const [userProfile, setUserProfile] = useState(() => {
     const saved = localStorage.getItem('rengram_profile');
-    return saved ? JSON.parse(saved) : {
+    const parsed = saved ? JSON.parse(saved) : null;
+    return parsed ? {
+      ...parsed,
+      avatar: parsed.avatar || IMAGES[0],
+      cover: parsed.cover || IMAGES[1],
+      myPosts: parsed.myPosts?.map((post: any) => ({
+        ...post,
+        image: post.image || IMAGES[Math.floor(Math.random() * IMAGES.length)],
+        avatar: post.avatar || IMAGES[0]
+      })) || []
+    } : {
       name: "RenGram User",
       avatar: IMAGES[0],
       cover: IMAGES[1],
@@ -365,8 +378,54 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
     };
   });
 
+  const [editingPost, setEditingPost] = useState<any | null>(null);
+  const [editCaption, setEditCaption] = useState('');
+
+  const handleDeletePost = (postId: string) => {
+    if (window.confirm("Bạn có chắc chắn muốn xóa bài viết này không?")) {
+      setUserProfile(prev => ({
+        ...prev,
+        myPosts: prev.myPosts.filter(p => p.id !== postId)
+      }));
+    }
+  };
+
+  const handleEditPost = (post: any) => {
+    setEditingPost(post);
+    setEditCaption(post.caption);
+  };
+
+  const saveEditPost = () => {
+    setUserProfile(prev => ({
+      ...prev,
+      myPosts: prev.myPosts.map(p => p.id === editingPost.id ? { ...p, caption: editCaption } : p)
+    }));
+    setEditingPost(null);
+    setEditCaption('');
+  };
+
+
   useEffect(() => {
-    localStorage.setItem('rengram_profile', JSON.stringify(userProfile));
+    // Don't save base64 images to localStorage to avoid quota exceeded errors
+    const profileToSave = {
+      ...userProfile,
+      avatar: userProfile.avatar?.startsWith('data:image') ? undefined : userProfile.avatar,
+      cover: userProfile.cover?.startsWith('data:image') ? undefined : userProfile.cover,
+      myPosts: userProfile.myPosts?.map((post: any) => ({
+        ...post,
+        image: post.image?.startsWith('data:image') ? undefined : post.image,
+        avatar: post.avatar?.startsWith('data:image') ? undefined : post.avatar
+      }))
+    };
+    try {
+      localStorage.setItem('rengram_profile', JSON.stringify(profileToSave));
+    } catch (e) {
+      console.error("Failed to save to localStorage:", e);
+      // If quota exceeded, try clearing old data
+      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+        localStorage.removeItem('rengram_profile');
+      }
+    }
   }, [userProfile]);
 
   const [homeTopic, setHomeTopic] = useState(() => localStorage.getItem('rengram_home_topic') || '');
@@ -1010,7 +1069,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
                               likes: 0,
                               comments: []
                             };
-                            setUserProfile(prev => ({ ...prev, myPosts: [newPost, ...prev.myPosts] }));
+                                                         setUserProfile(prev => ({ ...prev, myPosts: [newPost, ...prev.myPosts].slice(0, 20) }));
                             setShowCreatePost(false);
                             setNewPostData({ image: '', caption: '' });
                           }}
@@ -1031,40 +1090,49 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
             </div>
 
             {/* My Posts Grid */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-6">
               {userProfile.myPosts.map(post => (
                 <div 
                   key={post.id} 
-                  className="bg-white rounded-2xl overflow-hidden shadow-sm border border-pink-100 relative bg-cover bg-center group"
+                  className="bg-white rounded-3xl overflow-hidden shadow-md border border-pink-100 relative bg-cover bg-center group"
                   style={{ backgroundImage: cardBgs[post.id] ? `url(${cardBgs[post.id]})` : 'none' }}
                 >
                   {cardBgs[post.id] && <div className="absolute inset-0 bg-white/60 backdrop-blur-[2px] z-0"></div>}
                   
-                  <label className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
-                    <ImageIcon className="w-3 h-3" />
+                  <label className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-white/80 rounded-full cursor-pointer hover:bg-pink-100 text-pink-500" title="Đổi nền thẻ">
+                    <ImageIcon className="w-5 h-5" />
                     <input type="file" accept="image/*" className="hidden" onChange={e => handleCardBgUpload(e, post.id)} />
                   </label>
 
+                  <div className="absolute top-4 left-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                    <button onClick={() => handleEditPost(post)} className="p-2 bg-white/80 rounded-full hover:bg-pink-100 text-pink-500" title="Chỉnh sửa">
+                        <PenTool className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => handleDeletePost(post.id)} className="p-2 bg-white/80 rounded-full hover:bg-red-100 text-red-500" title="Xóa">
+                        <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
+
                   <div className="relative z-10">
                     <img src={post.image} alt="post" className="w-full aspect-square object-cover" />
-                    <div className="p-3">
+                    <div className="p-6">
                       <button 
                         onClick={() => handleLoadComments(post.id, true)}
-                        className="flex items-center gap-2 text-pink-500 mb-2 hover:scale-105 transition-transform bg-pink-50 px-3 py-1.5 rounded-full border border-pink-100"
+                        className="flex items-center gap-2 text-pink-500 mb-4 hover:scale-105 transition-transform bg-pink-50 px-4 py-2 rounded-full border border-pink-100"
                         title="Gọi 200 bình luận NPC (Bạn bè, Bố mẹ...)"
                       >
-                        <Cat className="w-4 h-4" />
-                        <span className="text-xs font-bold">Gọi NPC Bình luận</span>
+                        <Cat className="w-5 h-5" />
+                        <span className="text-sm font-bold">Gọi NPC Bình luận</span>
                       </button>
-                      <p className="text-xs truncate">{post.caption}</p>
+                      <p className="text-base text-stone-800">{post.caption}</p>
                       
                       {post.comments.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-dashed border-pink-100">
-                          <p className="text-[10px] font-mono text-pink-400 mb-1">{post.comments.length} comments</p>
-                          <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar">
+                        <div className="mt-4 pt-4 border-t border-dashed border-pink-100">
+                          <p className="text-xs font-mono text-pink-400 mb-2">{post.comments.length} comments</p>
+                          <div className="max-h-48 overflow-y-auto space-y-3 custom-scrollbar">
                             {post.comments.map((cmt: any) => (
-                              <div key={cmt.id} className="text-xs bg-pink-50 p-2 rounded-lg">
-                                <span className="font-bold block">{cmt.author}</span>
+                              <div key={cmt.id} className="text-sm bg-pink-50 p-3 rounded-xl">
+                                <span className="font-bold block text-pink-600">{cmt.author}</span>
                                 {cmt.text}
                               </div>
                             ))}
@@ -1682,6 +1750,32 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+        {/* Edit Post Modal */}
+        <AnimatePresence>
+          {editingPost && (
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+                className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl"
+              >
+                <h3 className="text-xl font-bold text-pink-500 mb-4">Chỉnh sửa bài đăng</h3>
+                <textarea 
+                  value={editCaption} 
+                  onChange={(e) => setEditCaption(e.target.value)}
+                  className="w-full p-3 border border-pink-200 rounded-xl mb-4 h-32 resize-none focus:outline-none focus:ring-2 focus:ring-pink-300"
+                />
+                <div className="flex gap-2">
+                  <button onClick={() => setEditingPost(null)} className="flex-1 py-2 text-stone-500 hover:bg-stone-100 rounded-xl font-bold">Hủy</button>
+                  <button onClick={saveEditPost} className="flex-1 py-2 bg-pink-500 text-white rounded-xl font-bold hover:bg-pink-600">Lưu</button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {

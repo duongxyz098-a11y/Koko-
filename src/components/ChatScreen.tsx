@@ -38,7 +38,7 @@ export default function ChatScreen({ prompt, onBack }: { prompt: Prompt, onBack:
 
     try {
       const reply = await sendCoreMessage(userMsg, messages, prompt);
-      setMessages([...newMessages, { role: 'assistant', content: reply }]);
+      setMessages([...newMessages, { role: 'assistant', content: reply.content }]);
     } catch (error: any) {
       window.alert(error.message);
       // Remove the user message if failed, or just show error

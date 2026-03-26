@@ -10,21 +10,40 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   const bgInputRef = useRef<HTMLInputElement>(null);
   
   // Game State
-  const [npcs, setNpcs] = useState<NPCProfile[]>([]);
+  const [npcs, setNpcs] = useState<NPCProfile[]>(() => {
+    try {
+      const saved = localStorage.getItem('loveshow_npcs');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [loadingNpcs, setLoadingNpcs] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [activeMiniGame, setActiveMiniGame] = useState<'none' | 'quiz' | 'cafe'>('none');
   const [selectedNpc, setSelectedNpc] = useState<NPCProfile | null>(null);
-  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'npc', content: string}[]>([]);
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'npc', content: string, usage?: any, isStreaming?: boolean}[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState(() => {
-    const saved = localStorage.getItem('loveshow_settings');
-    return saved ? JSON.parse(saved) : {
-      maxTokens: 30000,
-      timeoutMinutes: 5
-    };
+    try {
+      const saved = localStorage.getItem('loveshow_settings');
+      const parsed = saved ? JSON.parse(saved) : null;
+      return parsed || {
+        maxTokens: 30000,
+        timeoutMinutes: 5,
+        superMode: false
+      };
+    } catch (e) {
+      return {
+        maxTokens: 30000,
+        timeoutMinutes: 5,
+        superMode: false
+      };
+    }
   });
 
   useEffect(() => {
@@ -47,9 +66,16 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
       targetGender: 'male',
       minChars: 2000,
       maxChars: 4000,
-      avatarBg: '#FFFFFF'
+      avatarBg: '#FFFFFF',
+      quizCount: 10,
+      cafeCount: 10,
+      npcCount: 40
     };
   });
+
+  useEffect(() => {
+    localStorage.setItem('loveshow_npcs', JSON.stringify(npcs));
+  }, [npcs]);
 
   const handleSaveProfile = () => {
     localStorage.setItem('loveshow_profile', JSON.stringify(formData));
@@ -58,16 +84,18 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
 
   const handleSelectNpc = async (npc: NPCProfile) => {
     setSelectedNpc(npc);
-    setChatHistory([]);
+    setChatHistory([{ role: 'npc', content: '', isStreaming: true }]);
     setIsTyping(true);
     
     try {
       // Gọi API ngay lập tức để lấy lời chào dài
-      const response = await generateNPCResponse(npc, "Chào bạn! Hãy giới thiệu bản thân một cách chi tiết và ấn tượng nhé.", [], formData);
-      setChatHistory([{ role: 'npc', content: response }]);
+      const response = await generateNPCResponse(npc, "Chào bạn! Hãy giới thiệu bản thân một cách chi tiết và ấn tượng nhé.", [], formData, undefined, undefined, undefined, (text) => {
+        setChatHistory([{ role: 'npc', content: text, isStreaming: true }]);
+      });
+      setChatHistory([{ role: 'npc', content: response.content, usage: response.usage, isStreaming: false }]);
     } catch (e) {
       console.error(e);
-      setChatHistory([{ role: 'npc', content: "Xin lỗi, hiện tại tôi đang hơi bối rối một chút..." }]);
+      setChatHistory([{ role: 'npc', content: "Xin lỗi, hiện tại tôi đang hơi bối rối một chút...", isStreaming: false }]);
     } finally {
       setIsTyping(false);
     }
@@ -76,14 +104,21 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   const handleLoadMoreNpcs = async () => {
     setLoadingNpcs(true);
     setError(null);
+    const count = formData.npcCount || 40;
+    setProgress({ current: 0, total: count });
     try {
-      const generatedNpcs = await generateNPCs(20, formData);
-      setNpcs(prev => [...prev, ...generatedNpcs]);
+      await generateNPCs(count, formData, (current, total, newItems) => {
+        setProgress({ current, total });
+        if (newItems) {
+          setNpcs(prev => [...prev, ...newItems]);
+        }
+      });
     } catch (e: any) {
       console.error(e);
       setError(e.message || "Có lỗi xảy ra khi gọi API.");
     } finally {
       setLoadingNpcs(false);
+      setProgress({ current: 0, total: 0 });
     }
   };
 
@@ -99,16 +134,39 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
     
     const userMsg = chatInput;
     setChatInput('');
-    setChatHistory(prev => [...prev, { role: 'user', content: userMsg }]);
+    setChatHistory(prev => [...prev, { role: 'user', content: userMsg }, { role: 'npc', content: '', isStreaming: true }]);
     setIsTyping(true);
     
     try {
-      const history = chatHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
-      const response = await generateNPCResponse(selectedNpc, userMsg, history, formData, settings.maxTokens, settings.timeoutMinutes);
-      setChatHistory(prev => [...prev, { role: 'npc', content: response }]);
-    } catch (e) {
+      const history = (chatHistory || []).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
+      const response = await generateNPCResponse(selectedNpc, userMsg, history, formData, settings.maxTokens, settings.timeoutMinutes, settings.superMode, (text) => {
+        setChatHistory(prev => {
+          const newHistory = [...prev];
+          const lastMsg = newHistory[newHistory.length - 1];
+          if (lastMsg && lastMsg.role === 'npc' && lastMsg.isStreaming) {
+            return [...newHistory.slice(0, -1), { ...lastMsg, content: text }];
+          }
+          return newHistory;
+        });
+      });
+      setChatHistory(prev => {
+        const newHistory = [...prev];
+        const lastMsg = newHistory[newHistory.length - 1];
+        if (lastMsg && lastMsg.role === 'npc' && lastMsg.isStreaming) {
+          return [...newHistory.slice(0, -1), { role: 'npc', content: response.content, usage: response.usage, isStreaming: false }];
+        }
+        return newHistory;
+      });
+    } catch (e: any) {
       console.error(e);
-      setChatHistory(prev => [...prev, { role: 'npc', content: "Xin lỗi, hiện tại tôi đang hơi bối rối một chút..." }]);
+      setChatHistory(prev => {
+        const newHistory = [...prev];
+        const lastMsg = newHistory[newHistory.length - 1];
+        if (lastMsg && lastMsg.role === 'npc' && lastMsg.isStreaming) {
+          return [...newHistory.slice(0, -1), { role: 'npc', content: "Xin lỗi, hiện tại tôi đang hơi bối rối một chút... " + e.message, isStreaming: false }];
+        }
+        return [...newHistory, { role: 'npc', content: "Xin lỗi, hiện tại tôi đang hơi bối rối một chút... " + e.message, isStreaming: false }];
+      });
     } finally {
       setIsTyping(false);
     }
@@ -128,7 +186,6 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   };
 
   return (
-    <>
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -159,7 +216,7 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
 
       {showSettings && (
         <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center p-4">
-          {console.log("Modal rendered")}
+          {null}
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
             <h2 className="text-xl font-bold mb-4">Cài đặt</h2>
             <div className="space-y-4">
@@ -173,7 +230,24 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
               </div>
               <div>
                 <label className="block text-sm font-bold mb-1">Thời gian chờ (Phút)</label>
-                <input type="number" value={settings.timeoutMinutes} onChange={e => setSettings(s => ({...s, timeoutMinutes: parseInt(e.target.value)}))} className="w-full p-2 border rounded-lg" />
+                <div className="flex gap-2">
+                  <input type="number" value={settings.timeoutMinutes} onChange={e => setSettings(s => ({...s, timeoutMinutes: parseInt(e.target.value)}))} className="flex-1 p-2 border rounded-lg" />
+                  <button 
+                    onClick={() => {
+                      const suggested = Math.max(5, Math.ceil((formData.maxChars || 2000) / 500) + (npcs.length > 0 ? 2 : 0));
+                      setSettings(s => ({...s, timeoutMinutes: suggested}));
+                    }}
+                    className="px-2 py-1 bg-blue-100 text-blue-600 text-[10px] font-bold rounded hover:bg-blue-200"
+                  >
+                    Đề xuất
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={settings.superMode} onChange={e => setSettings(s => ({...s, superMode: e.target.checked}))} />
+                  <span className="text-sm font-bold">Super Mode (100k Tokens)</span>
+                </label>
               </div>
               <button onClick={() => setShowSettings(false)} className="w-full bg-pink-500 text-white p-2 rounded-lg font-bold">Lưu</button>
               <button onClick={async () => {
@@ -209,9 +283,9 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
       <div className="flex-1 overflow-y-auto p-4 pb-24">
         <AnimatePresence mode="wait">
           {activeMiniGame === 'quiz' ? (
-            <LoveQuiz key="quiz" onBack={() => setActiveMiniGame('none')} />
+            <LoveQuiz key="quiz" onBack={() => setActiveMiniGame('none')} quizCount={formData.quizCount || 10} />
           ) : activeMiniGame === 'cafe' ? (
-            <LoveCafe key="cafe" onBack={() => setActiveMiniGame('none')} />
+            <LoveCafe key="cafe" onBack={() => setActiveMiniGame('none')} cafeCount={formData.cafeCount || 10} />
           ) : selectedNpc ? (
             <ChatView 
               key="chat" 
@@ -231,6 +305,8 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
               onSaveProfile={handleSaveProfile}
               onStartQuiz={() => setActiveMiniGame('quiz')}
               onStartCafe={() => setActiveMiniGame('cafe')}
+              loadingNpcs={loadingNpcs}
+              progress={progress}
             />
           ) : (
             <MainShowTab 
@@ -265,7 +341,7 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
-function ApplyTab({ formData, setFormData, onSaveProfile, onStartQuiz, onStartCafe }: any) {
+function ApplyTab({ formData, setFormData, onSaveProfile, onStartQuiz, onStartCafe, loadingNpcs, progress }: any) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -400,28 +476,93 @@ function ApplyTab({ formData, setFormData, onSaveProfile, onStartQuiz, onStartCa
             </div>
           </div>
 
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Số NPC</label>
+              <input
+                type="number"
+                value={formData.npcCount || 40}
+                onChange={e => setFormData({...formData, npcCount: parseInt(e.target.value)})}
+                className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Số câu hỏi Quiz</label>
+              <input
+                type="number"
+                value={formData.quizCount || 10}
+                onChange={e => setFormData({...formData, quizCount: parseInt(e.target.value)})}
+                className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">Số tình huống Cafe</label>
+              <input
+                type="number"
+                value={formData.cafeCount || 10}
+                onChange={e => setFormData({...formData, cafeCount: parseInt(e.target.value)})}
+                className="w-full p-3 rounded-xl bg-[#FFF5F7] border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] text-gray-700"
+              />
+            </div>
+          </div>
+
           <button onClick={onSaveProfile} className="w-full py-4 bg-[#F3B4C2] text-white rounded-xl font-bold shadow-md hover:bg-[#e8a5b4] transition-colors mt-4">
             Lưu Hồ Sơ
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div onClick={onStartQuiz} className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] flex flex-col items-center text-center gap-3 cursor-pointer hover:scale-105 transition-transform">
-          <div className="w-16 h-16 bg-[#FFF5F7] rounded-full flex items-center justify-center text-[#F3B4C2]">
-            <Star size={32} />
+      {loadingNpcs && (
+        <div className="mb-4 p-4 bg-white/50 rounded-2xl border border-[#F9C6D4] flex flex-col items-center gap-2">
+          <div className="flex items-center gap-2 text-[#F3B4C2] font-bold text-sm">
+            <Loader2 className="animate-spin" size={16} />
+            Đang tìm kiếm NPC... ({progress.current}/{progress.total})
           </div>
-          <h3 className="font-bold text-gray-800">Thử Thách 10 Câu Hỏi</h3>
-          <p className="text-xs text-gray-500">Trả lời sai tối đa 1 lần để đi tiếp.</p>
-        </div>
-        <div onClick={onStartCafe} className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] flex flex-col items-center text-center gap-3 cursor-pointer hover:scale-105 transition-transform">
-          <div className="w-16 h-16 bg-[#FFF5F7] rounded-full flex items-center justify-center text-[#F3B4C2]">
-            <Coffee size={32} />
+          <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+            <div 
+              className="bg-[#F3B4C2] h-full transition-all duration-500" 
+              style={{ width: `${(progress.current / (progress.total || 1)) * 100}%` }}
+            />
           </div>
-          <h3 className="font-bold text-gray-800">Cafe Tình Yêu ☕</h3>
-          <p className="text-xs text-gray-500">Lắng nghe và giải quyết tâm sự của khách hàng.</p>
         </div>
-      </div>
+      )}
+
+          <div className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] flex flex-col items-center text-center gap-3 cursor-pointer hover:scale-105 transition-transform">
+            <div onClick={onStartQuiz} className="flex flex-col items-center gap-3">
+              <div className="w-16 h-16 bg-[#FFF5F7] rounded-full flex items-center justify-center text-[#F3B4C2]">
+                <Star size={32} />
+              </div>
+              <h3 className="font-bold text-gray-800">Thử Thách {formData.quizCount || 10} Câu Hỏi</h3>
+              <p className="text-xs text-gray-500">Trả lời sai tối đa 1 lần để đi tiếp.</p>
+            </div>
+            <div className="mt-2 w-full">
+              <label className="text-[10px] font-bold text-gray-400">Số lượng câu hỏi</label>
+              <input 
+                type="number" 
+                value={formData.quizCount || 10} 
+                onChange={e => setFormData({...formData, quizCount: parseInt(e.target.value)})}
+                className="w-full p-1 text-xs border rounded bg-white"
+              />
+            </div>
+          </div>
+          <div className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 shadow-sm border-2 border-dashed border-[#F9C6D4] flex flex-col items-center text-center gap-3 cursor-pointer hover:scale-105 transition-transform">
+            <div onClick={onStartCafe} className="flex flex-col items-center gap-3">
+              <div className="w-16 h-16 bg-[#FFF5F7] rounded-full flex items-center justify-center text-[#F3B4C2]">
+                <Coffee size={32} />
+              </div>
+              <h3 className="font-bold text-gray-800">Cafe Tình Yêu {formData.cafeCount || 5} ☕</h3>
+              <p className="text-xs text-gray-500">Lắng nghe và giải quyết tâm sự của khách hàng.</p>
+            </div>
+            <div className="mt-2 w-full">
+              <label className="text-[10px] font-bold text-gray-400">Số lượng tình huống</label>
+              <input 
+                type="number" 
+                value={formData.cafeCount || 5} 
+                onChange={e => setFormData({...formData, cafeCount: parseInt(e.target.value)})}
+                className="w-full p-1 text-xs border rounded bg-white"
+              />
+            </div>
+          </div>
     </motion.div>
   );
 }
@@ -447,7 +588,7 @@ function MainShowTab({ npcs, loading, onSelectNpc, onLoadMore, avatarBg, error }
         )}
 
         <div className="mt-8 grid grid-cols-2 gap-4">
-            {npcs.map(npc => (
+            {(npcs || []).map(npc => (
               <div key={npc.id} className="bg-[#FFF5F7] rounded-2xl p-4 border border-[#F9C6D4] flex flex-col items-center gap-2 text-center">
                 <div className="w-20 h-20 rounded-full shadow-sm overflow-hidden border-2 border-[#F3B4C2]" style={{ backgroundColor: avatarBg }}>
                   <img src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${npc.avatarSeed}`} alt={npc.name} className="w-full h-full object-cover" />
@@ -502,15 +643,22 @@ function ChatView({ npc, onBack, chatHistory, chatInput, setChatInput, handleSen
           </div>
         )}
         
-        {chatHistory.map((msg: any, i: number) => (
+        {(chatHistory || []).map((msg: any, i: number) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[90%] p-4 rounded-3xl ${msg.role === 'user' ? 'bg-[#F3B4C2] text-white rounded-tr-none shadow-md' : 'bg-white text-gray-800 border border-[#F9C6D4] rounded-tl-none shadow-sm'}`}>
               <p className="text-base leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+              {msg.usage && (
+                <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap gap-2 justify-end">
+                  <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded-full">Total: {msg.usage.total_tokens}</span>
+                  <span className="text-[9px] px-1.5 py-0.5 bg-blue-50 text-blue-500 rounded-full">Prompt: {msg.usage.prompt_tokens}</span>
+                  <span className="text-[9px] px-1.5 py-0.5 bg-green-50 text-green-500 rounded-full">Comp: {msg.usage.completion_tokens}</span>
+                </div>
+              )}
             </div>
           </div>
         ))}
         
-        {isTyping && chatHistory.length > 0 && (
+        {isTyping && chatHistory.length > 0 && !chatHistory[chatHistory.length - 1].content && (
           <div className="flex justify-start">
             <div className="bg-white border border-[#F9C6D4] p-4 rounded-3xl rounded-tl-none flex gap-1 shadow-sm">
               <div className="w-2 h-2 bg-[#F3B4C2] rounded-full animate-bounce" />
@@ -543,9 +691,10 @@ function ChatView({ npc, onBack, chatHistory, chatInput, setChatInput, handleSen
   );
 }
 
-function LoveQuiz({ onBack }: { onBack: () => void }) {
+function LoveQuiz({ onBack, quizCount }: { onBack: () => void, quizCount: number }) {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState({ current: 0, total: quizCount });
   const [currentQ, setCurrentQ] = useState(0);
   const [score, setScore] = useState(0);
   const [mistakes, setMistakes] = useState(0);
@@ -553,14 +702,20 @@ function LoveQuiz({ onBack }: { onBack: () => void }) {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
 
   useEffect(() => {
-    generateLoveQuiz().then(q => {
-      setQuestions(q);
+    generateLoveQuiz(quizCount, (current, total, newItems) => {
+      setProgress({ current, total });
+      if (newItems) {
+        setQuestions(prev => [...prev, ...newItems]);
+        setLoading(false); // Start game as soon as first batch is ready
+      }
+    }).catch(e => {
+      console.error(e);
       setLoading(false);
     });
   }, []);
 
   const handleAnswer = (index: number) => {
-    if (selectedAnswer !== null) return;
+    if (selectedAnswer !== null || !questions[currentQ]) return;
     setSelectedAnswer(index);
     
     const isCorrect = index === questions[currentQ].correctAnswerIndex;
@@ -603,7 +758,13 @@ function LoveQuiz({ onBack }: { onBack: () => void }) {
       {loading ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4">
           <Loader2 className="animate-spin text-[#F3B4C2]" size={48} />
-          <p className="text-[#F3B4C2] font-bold">Đang chuẩn bị câu hỏi...</p>
+          <p className="text-[#F3B4C2] font-bold">Đang chuẩn bị câu hỏi... ({progress.current}/{progress.total})</p>
+          <div className="w-full max-w-xs bg-gray-100 h-2 rounded-full overflow-hidden">
+            <div 
+              className="bg-[#F3B4C2] h-full transition-all duration-500" 
+              style={{ width: `${(progress.current / progress.total) * 100}%` }}
+            />
+          </div>
         </div>
       ) : gameOver ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
@@ -618,10 +779,10 @@ function LoveQuiz({ onBack }: { onBack: () => void }) {
       ) : (
         <div className="flex-1 flex flex-col">
           <div className="text-sm text-gray-500 font-bold mb-2">Câu hỏi {currentQ + 1}/{questions.length}</div>
-          <h3 className="text-lg font-bold text-gray-800 mb-6">{questions[currentQ]?.question}</h3>
+          <h3 className="text-lg font-bold text-gray-800 mb-6">{questions[currentQ]?.question || "Đang tải câu hỏi..."}</h3>
           
           <div className="space-y-3 mt-auto">
-            {questions[currentQ]?.options.map((opt, i) => {
+            {questions[currentQ]?.options?.map((opt, i) => {
               let btnClass = "w-full p-4 rounded-xl border-2 text-left font-medium transition-all ";
               if (selectedAnswer === null) {
                 btnClass += "border-[#F9C6D4] bg-[#FFF5F7] text-gray-700 hover:bg-[#F9C6D4] hover:text-white";
@@ -651,9 +812,10 @@ function LoveQuiz({ onBack }: { onBack: () => void }) {
   );
 }
 
-function LoveCafe({ onBack }: { onBack: () => void }) {
+function LoveCafe({ onBack, cafeCount }: { onBack: () => void, cafeCount: number }) {
   const [scenarios, setScenarios] = useState<CafeScenario[]>([]);
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState({ current: 0, total: cafeCount });
   const [loadingMsg, setLoadingMsg] = useState("Đang làm việc chờ chút nhennn~");
   const [error, setError] = useState<string | null>(null);
   const [currentS, setCurrentS] = useState(0);
@@ -676,9 +838,12 @@ function LoveCafe({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    generateCafeScenarios(5).then(s => {
-      setScenarios(s);
-      setLoading(false);
+    generateCafeScenarios(cafeCount, (current, total, newItems) => {
+      setProgress({ current, total });
+      if (newItems) {
+        setScenarios(prev => [...prev, ...newItems]);
+        setLoading(false); // Start game as soon as first batch is ready
+      }
     }).catch(e => {
       console.error(e);
       setError(e.message || "Có lỗi xảy ra khi gọi API.");
@@ -705,7 +870,7 @@ function LoveCafe({ onBack }: { onBack: () => void }) {
   };
 
   const handleAdvice = (index: number) => {
-    if (selectedAdvice !== null) return;
+    if (selectedAdvice !== null || !scenarios[currentS]) return;
     setSelectedAdvice(index);
     
     if (index === scenarios[currentS].bestAdviceIndex) {
@@ -740,7 +905,13 @@ function LoveCafe({ onBack }: { onBack: () => void }) {
       {loading ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4">
           <Loader2 className="animate-spin text-[#F3B4C2]" size={48} />
-          <p className="text-[#F3B4C2] font-bold">{loadingMsg}</p>
+          <p className="text-[#F3B4C2] font-bold">{loadingMsg} ({progress.current}/{progress.total})</p>
+          <div className="w-full max-w-xs bg-gray-100 h-2 rounded-full overflow-hidden">
+            <div 
+              className="bg-[#F3B4C2] h-full transition-all duration-500" 
+              style={{ width: `${(progress.current / progress.total) * 100}%` }}
+            />
+          </div>
         </div>
       ) : error ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-4 p-6">
@@ -785,12 +956,12 @@ function LoveCafe({ onBack }: { onBack: () => void }) {
                 <p className="text-xs text-gray-500 italic">Gọi món: {scenarios[currentS]?.coffeeOrder}</p>
               </div>
             </div>
-            <p className="text-sm text-gray-700 mt-2">"{scenarios[currentS]?.problem}"</p>
+            <p className="text-sm text-gray-700 mt-2">"{scenarios[currentS]?.problem || "Đang tải tình huống..."}"</p>
           </div>
           
           <div className="space-y-3 mt-auto">
             <p className="text-sm font-bold text-gray-500 mb-2">Lời khuyên của bạn:</p>
-            {scenarios[currentS]?.options.map((opt, i) => {
+            {scenarios[currentS]?.options?.map((opt, i) => {
               let btnClass = "w-full p-3 rounded-xl border-2 text-left text-sm font-medium transition-all ";
               if (selectedAdvice === null) {
                 btnClass += "border-[#F9C6D4] bg-white text-gray-700 hover:bg-[#FFF5F7]";

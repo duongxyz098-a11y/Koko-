@@ -10,6 +10,7 @@
 
 import { useState, useEffect } from 'react';
 import { AnimatePresence } from 'motion/react';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import LockScreen from './components/LockScreen';
 import PasscodeScreen from './components/PasscodeScreen';
 import HomeScreen from './components/HomeScreen';
@@ -19,10 +20,14 @@ import DatingScreen from './components/DatingScreen';
 import KokoYouTube from './components/KokoYouTube';
 import LoveShowScreen from './components/LoveShowScreen';
 import NovelScreen from './components/NovelScreen';
+import KikokoNovelScreen from './components/KikokoNovelScreen';
 import RenGram from './components/RenGram';
+import KokoApp from './koko/KokoApp';
+import UserProfileTab from './koko/components/UserProfileTab';
+import BanhNhoChatApp from './components/BanhNhoChatApp';
 
 export default function App() {
-  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating' | 'youtube' | 'loveshow' | 'novel' | 'rengram'>('lock');
+  const [screen, setScreen] = useState<'lock' | 'passcode' | 'home' | 'koko' | 'dating' | 'youtube' | 'loveshow' | 'novel' | 'kikokonovel' | 'rengram' | 'kokoroleplay' | 'userprofile' | 'banhnho'>('lock');
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<ApiSettingsData>(() => {
     const saved = localStorage.getItem('kotokoo_settings');
@@ -30,11 +35,16 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('kotokoo_settings', JSON.stringify(settings));
+    try {
+      localStorage.setItem('kotokoo_settings', JSON.stringify(settings));
+    } catch (e) {
+      console.error('Failed to save settings to localStorage:', e);
+    }
   }, [settings]);
 
   return (
     <div className="h-screen w-full bg-black overflow-hidden font-sans relative">
+      <ErrorBoundary>
         <AnimatePresence mode="wait">
           {screen === 'lock' && (
             <LockScreen key="lock" onUnlock={() => setScreen('passcode')} />
@@ -55,7 +65,11 @@ export default function App() {
               openYouTube={() => setScreen('youtube')}
               openLoveShow={() => setScreen('loveshow')}
               openNovel={() => setScreen('novel')}
+              openKikokoNovel={() => setScreen('kikokonovel')}
               openRenGram={() => setScreen('rengram')}
+              openKokoRoleplay={() => setScreen('kokoroleplay')}
+              openUserProfile={() => setScreen('userprofile')}
+              openBanhNho={() => setScreen('banhnho')}
             />
           )}
           {screen === 'koko' && (
@@ -73,10 +87,25 @@ export default function App() {
           {screen === 'novel' && (
             <NovelScreen key="novel" onBack={() => setScreen('home')} />
           )}
+          {screen === 'kikokonovel' && (
+            <KikokoNovelScreen key="kikokonovel" onBack={() => setScreen('home')} />
+          )}
           {screen === 'rengram' && (
             <RenGram key="rengram" onBack={() => setScreen('home')} />
           )}
+          {screen === 'kokoroleplay' && (
+            <KokoApp key="kokoroleplay" onBack={() => setScreen('home')} />
+          )}
+          {screen === 'userprofile' && (
+            <div className="absolute inset-0 bg-transparent z-50">
+              <UserProfileTab key="userprofile" onBack={() => setScreen('home')} />
+            </div>
+          )}
+          {screen === 'banhnho' && (
+            <BanhNhoChatApp key="banhnho" onBack={() => setScreen('home')} />
+          )}
         </AnimatePresence>
+      </ErrorBoundary>
 
         <AnimatePresence>
           {showSettings && (
