@@ -171,6 +171,13 @@ export default function HomeScreen({ openSettings, openKoko, openDating, openYou
                   </div>
                   <span className="text-[11px] font-medium text-gray-700 text-center leading-tight">Bánh nhỏ<br/>Trò chuyện</span>
                 </div>
+
+                <div className="flex flex-col items-center gap-1" onClick={openCarrd}>
+                  <div className="w-[60px] h-[60px] bg-gradient-to-br from-[#F9C6D4] to-[#F3B4C2] rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-white cursor-pointer active:scale-95 transition-transform">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-user"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                  </div>
+                  <span className="text-[11px] font-medium text-gray-700 text-center leading-tight">Carrd<br/>Profile</span>
+                </div>
               </div>
             )}
             {page === 2 && (
