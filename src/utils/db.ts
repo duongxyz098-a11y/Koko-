@@ -4,7 +4,8 @@ const DB_NAME = 'banhnho_db';
 const STORE_NAME = 'bot_cards';
 const BG_STORE_NAME = 'backgrounds';
 const STORY_STORE_NAME = 'stories';
-const VERSION = 3;
+const CHAT_STORE_NAME = 'chat_history';
+const VERSION = 4;
 
 export async function getDB(): Promise<IDBPDatabase> {
   return openDB(DB_NAME, VERSION, {
@@ -18,8 +19,31 @@ export async function getDB(): Promise<IDBPDatabase> {
       if (!db.objectStoreNames.contains(STORY_STORE_NAME)) {
         db.createObjectStore(STORY_STORE_NAME);
       }
+      if (!db.objectStoreNames.contains(CHAT_STORE_NAME)) {
+        db.createObjectStore(CHAT_STORE_NAME);
+      }
     },
   });
+}
+
+export async function saveChat(botId: string, messages: any[]) {
+  const db = await getDB();
+  await db.put(CHAT_STORE_NAME, messages, botId);
+}
+
+export async function loadChat(botId: string): Promise<any[]> {
+  const db = await getDB();
+  return (await db.get(CHAT_STORE_NAME, botId)) || [];
+}
+
+export async function saveChatSettings(botId: string, settings: any) {
+  const db = await getDB();
+  await db.put(CHAT_STORE_NAME, settings, `settings_${botId}`);
+}
+
+export async function loadChatSettings(botId: string): Promise<any> {
+  const db = await getDB();
+  return await db.get(CHAT_STORE_NAME, `settings_${botId}`);
 }
 
 export async function saveCards(cards: any[]) {

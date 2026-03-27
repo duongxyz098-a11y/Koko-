@@ -2,7 +2,56 @@ import React, { useState, useEffect, useRef } from 'react';
 import { safeSetItem } from '../../utils/storage';
 import { saveCards, loadCards, saveDraft, loadDraft } from '../../utils/db';
 
-export const PinkBotCard = ({ avatar, name, occupation, hobbies, appearance, links, about, history }: any) => {
+const PinkBow = ({ className }: { className?: string }) => (
+  <svg 
+    width="28" 
+    height="28" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+  >
+    {/* Left Loop */}
+    <path 
+      d="M12 11C12 11 10 7 6.5 7C4 7 3 8.5 3 10.5C3 12.5 4.5 14 6.5 14C9 14 12 11 12 11Z" 
+      fill="#FFB6C1" 
+      stroke="#FF69B4" 
+      strokeWidth="1.5"
+    />
+    {/* Right Loop */}
+    <path 
+      d="M12 11C12 11 14 7 17.5 7C20 7 21 8.5 21 10.5C21 12.5 19.5 14 17.5 14C15 14 12 11 12 11Z" 
+      fill="#FFB6C1" 
+      stroke="#FF69B4" 
+      strokeWidth="1.5"
+    />
+    {/* Left Tail */}
+    <path 
+      d="M11 13L8 19" 
+      stroke="#FF69B4" 
+      strokeWidth="2.5" 
+      strokeLinecap="round"
+    />
+    {/* Right Tail */}
+    <path 
+      d="M13 13L16 19" 
+      stroke="#FF69B4" 
+      strokeWidth="2.5" 
+      strokeLinecap="round"
+    />
+    {/* Center Knot */}
+    <rect 
+      x="10" 
+      y="9.5" 
+      width="4" 
+      height="3.5" 
+      rx="1.5" 
+      fill="#FF69B4"
+    />
+  </svg>
+);
+
+export const PinkBotCard = ({ avatar, name, occupation, hobbies, appearance, links, about, history, onRoleplay }: any) => {
   return (
     <div className="w-[92%] max-w-[500px] bg-white shadow-[0_4px_30px_rgba(0,0,0,0.15)] mx-auto relative z-10 border-b-[8px] border-[#2F2F2F] text-[14px] leading-[1.5]">
       {/* Part A: Header */}
@@ -95,6 +144,20 @@ export const PinkBotCard = ({ avatar, name, occupation, hobbies, appearance, lin
               <p className="break-words"><strong>About:</strong> {about || 'Thông tin chi tiết...'}</p>
               <p className="break-words"><strong>Quá khứ:</strong> {history || 'Lịch sử...'}</p>
             </div>
+
+            {/* Roleplay Box */}
+            {onRoleplay && (
+              <div className="mt-4 pt-4 border-t border-[#F9C6D4] border-dashed">
+                <button 
+                  onClick={onRoleplay}
+                  className="w-full bg-[#FFF0F3] hover:bg-[#FDE2E4] text-[#D63384] font-bold py-3.5 rounded-2xl shadow-[0_4px_15px_rgba(243,180,194,0.3)] transition-all flex items-center justify-center gap-3 border-2 border-[#F9C6D4] border-dashed group"
+                >
+                  <PinkBow className="group-hover:scale-125 transition-transform" />
+                  <span className="tracking-wide">Bắt đầu Roleplay</span>
+                  <PinkBow className="group-hover:scale-125 transition-transform" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -110,7 +173,7 @@ export const PinkBotCard = ({ avatar, name, occupation, hobbies, appearance, lin
   );
 };
 
-export const ChocolateBotCard = ({ avatar, name, intro, shortInfo, freeText, bulletPoints, about, mediaImages, links, navButtons }: any) => {
+export const ChocolateBotCard = ({ avatar, name, intro, shortInfo, freeText, bulletPoints, about, mediaImages, links, navButtons, onRoleplay }: any) => {
   return (
     <div className="w-[92%] max-w-[500px] bg-pink-stripes shadow-[0_10px_60px_rgba(249,198,212,0.3)] mx-auto relative z-10 border-y-[6px] border-[#FDE2E4] text-[14px] leading-[1.5]">
       
@@ -228,6 +291,20 @@ export const ChocolateBotCard = ({ avatar, name, intro, shortInfo, freeText, bul
                 </div>
               ))}
             </div>
+
+            {/* Roleplay Box */}
+            {onRoleplay && (
+              <div className="mt-4">
+                <button 
+                  onClick={onRoleplay}
+                  className="w-full bg-[#FFF5F7] lace-border-thin p-4 text-[#FF69B4] font-bold text-sm flex items-center justify-center gap-4 hover:bg-[#FDE2E4] transition-all shadow-[0_4px_12px_rgba(253,226,228,0.5)] rounded-xl group"
+                >
+                  <PinkBow className="group-hover:rotate-12 transition-transform" />
+                  <span className="tracking-[0.2em] uppercase font-serif">Vào Roleplay</span>
+                  <PinkBow className="group-hover:-rotate-12 transition-transform" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -269,7 +346,8 @@ export const BotCardPreview = ({
   bulletPoints,
   mediaImages,
   navButtons,
-  isGalleryDetail = false
+  isGalleryDetail = false,
+  onRoleplay
 }: any) => {
   return (
     <div className={`w-full flex flex-col items-center relative overflow-hidden ${isGalleryDetail ? 'mt-0' : 'mt-4'} pb-4`}>
@@ -297,6 +375,7 @@ export const BotCardPreview = ({
             links={links} 
             about={about} 
             history={history} 
+            onRoleplay={onRoleplay}
           />
         ) : (
           <ChocolateBotCard 
@@ -310,6 +389,7 @@ export const BotCardPreview = ({
             mediaImages={mediaImages}
             links={links}
             navButtons={navButtons}
+            onRoleplay={onRoleplay}
           />
         )}
       </div>

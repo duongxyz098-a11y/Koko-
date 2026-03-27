@@ -83,10 +83,29 @@ export default function BotCardGallery({ onEdit }: { onEdit?: (card: any, index:
         
         <div className="relative group w-full flex justify-center min-h-screen">
           <div ref={el => { cardRefs.current[viewIndex] = el; }} className="w-full">
-            <BotCardPreview {...card} isGalleryDetail={true} />
+            <BotCardPreview 
+              {...card} 
+              isGalleryDetail={true} 
+              onRoleplay={() => {
+                window.dispatchEvent(new CustomEvent('start-roleplay', { detail: card }));
+              }}
+            />
           </div>
           
           <div className="fixed top-6 right-6 flex flex-col gap-4 opacity-0 group-hover:opacity-100 transition-opacity z-[110]">
+            <button 
+              onClick={() => {
+                if (window.confirm(`Bắt đầu Roleplay với ${card.name}?`)) {
+                  // This will be handled by the parent component
+                  const event = new CustomEvent('start-roleplay', { detail: card });
+                  window.dispatchEvent(event);
+                }
+              }}
+              className="bg-white/95 backdrop-blur-md text-[#F3B4C2] p-4 rounded-full shadow-xl hover:bg-[#FDF2F5] hover:scale-110 transition-all"
+              title="Bắt đầu Roleplay"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            </button>
             {onEdit && (
               <button 
                 onClick={() => onEdit(card, viewIndex)}

@@ -6,10 +6,20 @@ import { compressImage } from '../utils/imageUtils';
 import { fetchAvailableModels, ApiProxySettings } from '../utils/apiProxy';
 import Tab1CreateBot from './banhnho/Tab1CreateBot';
 import BotCardGallery from './banhnho/BotCardGallery';
+import { RoleplayChat } from './banhnho/RoleplayChat';
 
 export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('banhnho_active_tab') || 'tab1');
   const [subTab, setSubTab] = useState<string | null>(() => localStorage.getItem('banhnho_sub_tab'));
+  const [roleplayBot, setRoleplayBot] = useState<any | null>(null);
+
+  useEffect(() => {
+    const handleStartRoleplay = (e: any) => {
+      setRoleplayBot(e.detail);
+    };
+    window.addEventListener('start-roleplay', handleStartRoleplay);
+    return () => window.removeEventListener('start-roleplay', handleStartRoleplay);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('banhnho_active_tab', activeTab);
@@ -702,6 +712,16 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
         <div className="fixed top-10 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-md border border-[#F9DDE3] text-[#8A7D85] px-6 py-3 rounded-full shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-4 z-[100]">
           <div className="w-2 h-2 rounded-full bg-[#4CAF50]"></div>
           <span className="font-medium">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Roleplay Chat Overlay */}
+      {roleplayBot && (
+        <div className="fixed inset-0 z-[100] bg-white">
+          <RoleplayChat 
+            bot={roleplayBot} 
+            onBack={() => setRoleplayBot(null)} 
+          />
         </div>
       )}
     </div>
