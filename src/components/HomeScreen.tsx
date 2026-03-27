@@ -1,70 +1,61 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Settings, MessageCircle, Image as ImageIcon, Phone, Camera, Heart, Tv, BookOpen, Sparkles } from 'lucide-react';
-import { saveToDB, getFromDB } from '../utils/indexedDB';
-import { compressImage } from '../utils/imageUtils';
 
 const pages = [0, 1, 2];
 
 export default function HomeScreen({ openSettings, openKoko, openDating, openYouTube, openLoveShow, openNovel, openKikokoNovel, openRenGram, openKokoRoleplay, openUserProfile, openBanhNho, openCarrd }: { openSettings: () => void, openKoko: () => void, openDating: () => void, openYouTube: () => void, openLoveShow: () => void, openNovel: () => void, openKikokoNovel: () => void, openRenGram: () => void, openKokoRoleplay: () => void, openUserProfile: () => void, openBanhNho: () => void, openCarrd: () => void }) {
   const [currentPage, setCurrentPage] = useState(0);
-  const [appBackground, setAppBackground] = useState('');
+  const [appBackground, setAppBackground] = useState(() => localStorage.getItem('home_bg') || '');
+  const bgInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const loadBg = async () => {
-      const saved = await getFromDB('backgrounds', 'home_bg');
-      if (saved) setAppBackground(saved);
-      else {
-        const legacy = localStorage.getItem('home_bg');
-        if (legacy) {
-          setAppBackground(legacy);
-          await saveToDB('backgrounds', 'home_bg', legacy);
-          localStorage.removeItem('home_bg');
-        }
-      }
-    };
-    loadBg();
-  }, []);
+    localStorage.setItem('home_bg', appBackground);
+  }, [appBackground]);
 
-  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      try {
-        const compressed = await compressImage(file, 3840, 2160, 0.9);
-        setAppBackground(compressed);
-        await saveToDB('backgrounds', 'home_bg', compressed);
-      } catch (error) {
-        console.error("Failed to upload home background", error);
-      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAppBackground(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
   return (
     <div 
-      className={`absolute inset-0 w-full h-full overflow-hidden bg-cover bg-center transition-all duration-300 ${!appBackground ? 'heart-pattern' : ''}`}
+      className="absolute inset-0 w-full h-full bg-[#FAF9F6] overflow-hidden bg-cover bg-center transition-all duration-300"
       style={{ backgroundImage: appBackground ? `url('${appBackground}')` : 'none' }}
     >
       {/* Pattern */}
       {!appBackground && (
         <div 
-          className="absolute inset-0 w-full h-full opacity-30"
+          className="absolute inset-0 w-full h-full opacity-50"
+          style={{ 
+            backgroundImage: 'radial-gradient(#00000022 1px, transparent 1px)',
+            backgroundSize: '20px 20px'
+          }}
         />
       )}
 
       {/* Top Bar for Background Upload */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-end z-20 pt-safe">
-        <label 
+        <input 
+          type="file" 
+          accept="image/*" 
+          className="hidden" 
+          ref={bgInputRef} 
+          onChange={handleBgUpload} 
+        />
+        <button 
+          onClick={() => bgInputRef.current?.click()}
           className="text-[12px] px-3 py-1.5 rounded-full bg-white/50 backdrop-blur-md border border-white/40 shadow-sm flex items-center gap-1.5 cursor-pointer hover:bg-white/70 transition-colors text-gray-700 font-medium"
         >
           <ImageIcon size={14} />
           Đổi nền
-          <input 
-            type="file" 
-            accept="image/*" 
-            className="hidden" 
-            onChange={handleBgUpload} 
-          />
-        </label>
+        </button>
       </div>
 
       {/* Pages */}
@@ -170,13 +161,6 @@ export default function HomeScreen({ openSettings, openKoko, openDating, openYou
                     <img src="https://i.postimg.cc/yNkB85Dd/662847c19c8cd32d8ffaea098e8d03f2-(1).png" className="w-full h-full object-cover rounded-xl" />
                   </div>
                   <span className="text-[11px] font-medium text-gray-700 text-center leading-tight">Bánh nhỏ<br/>Trò chuyện</span>
-                </div>
-
-                <div className="flex flex-col items-center gap-1" onClick={openCarrd}>
-                  <div className="w-[60px] h-[60px] bg-gradient-to-br from-[#F9C6D4] to-[#F3B4C2] rounded-[14px] shadow-[0_0_20px_#F9C6D4] flex items-center justify-center text-white cursor-pointer active:scale-95 transition-transform">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-user"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                  </div>
-                  <span className="text-[11px] font-medium text-gray-700 text-center leading-tight">Carrd<br/>Profile</span>
                 </div>
               </div>
             )}
