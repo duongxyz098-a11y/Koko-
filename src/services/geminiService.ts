@@ -89,8 +89,14 @@ export const generateCafeScenarios = async (): Promise<CafeScenario[]> => {
   ];
 };
 
-export const generateNPCResponse = async (npc: NPCProfile, userMessage: string): Promise<string> => {
-  return `That's interesting! Tell me more about it.`;
+export const generateNPCResponse = async (
+  npc: NPCProfile, 
+  userMessage: string, 
+  history?: any, 
+  profile?: any, 
+  ...args: any[]
+): Promise<{ content: string, usage?: any }> => {
+  return { content: `That's interesting! Tell me more about it.` };
 };
 
 export const extractJSON = (text: string): any => {

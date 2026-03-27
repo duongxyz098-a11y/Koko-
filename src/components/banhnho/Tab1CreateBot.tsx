@@ -1,6 +1,321 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { safeSetItem } from '../../utils/storage';
-import { Users, Plus, Trash2 } from 'lucide-react';
+import { saveCards, loadCards, saveDraft, loadDraft } from '../../utils/db';
+
+export const PinkBotCard = ({ avatar, name, occupation, hobbies, appearance, links, about, history }: any) => {
+  return (
+    <div className="w-[92%] max-w-[500px] bg-white shadow-[0_4px_30px_rgba(0,0,0,0.15)] mx-auto relative z-10 border-b-[8px] border-[#2F2F2F] text-[14px] leading-[1.5]">
+      {/* Part A: Header */}
+      <div 
+        className="relative w-full bg-[#2F2F2F] scalloped-bottom scalloped-bottom-pink flex justify-between items-center px-4 py-3"
+        style={{ backgroundImage: 'radial-gradient(#444 2px, transparent 2px)', backgroundSize: '8px 8px' }}
+      >
+        {/* Left Circle */}
+        <div className="w-8 h-8 rounded-full border border-[#F9C6D4] border-dashed flex items-center justify-center bg-[#2F2F2F]">
+          <span className="text-white text-xl">🕷️</span>
+        </div>
+        
+        {/* Center Title */}
+        <div className="bg-[#F9C6D4] px-5 py-2 rounded-xl border border-white border-dashed shadow-sm z-20">
+          <h2 className="font-cursive text-2xl text-[#2F2F2F] tracking-wide truncate max-w-[150px]">{name || 'Untitled'}</h2>
+        </div>
+        
+        {/* Right Circle */}
+        <div className="w-8 h-8 rounded-full border border-[#F9C6D4] border-dashed flex items-center justify-center bg-[#2F2F2F]">
+          <span className="text-white text-xl">🕷️</span>
+        </div>
+      </div>
+
+      {/* Part B: Body */}
+      <div className="grid grid-cols-[4fr_6fr] gap-4 p-4 mt-1">
+        
+        {/* Left Column */}
+        <div className="flex flex-col gap-3">
+          {/* User Image */}
+          <div className="w-full aspect-[3/4] rounded-xl border-[3px] border-dotted border-[#E0B0C0] overflow-hidden bg-[#FFF6F8] shadow-md">
+            {avatar ? (
+              <img src={avatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-[#E0B0C0] font-medium text-sm">Image</div>
+            )}
+          </div>
+          
+          {/* Divider */}
+          <div className="flex justify-center items-center gap-2 text-[#2F2F2F] text-lg opacity-70 my-1">
+            <span>🎀</span><span>✚</span><span>🎀</span>
+          </div>
+          
+          {/* Contact Section */}
+          <div className="text-center">
+            <h3 className="font-cursive text-xl text-[#2F2F2F] mb-2">find me...</h3>
+            <div className="flex flex-col gap-2 items-center">
+              {links && links.map((link: string, i: number) => link ? (
+                <div key={i} className="flex items-center gap-2 text-[12px] text-gray-500 w-full justify-center">
+                  <span className="text-[#2F2F2F] shrink-0">{i === 0 ? '📱' : i === 1 ? '🐦' : '📸'}</span>
+                  <span className="truncate max-w-[100px]">{link}</span>
+                </div>
+              ) : null)}
+              {(!links || links.every((l: string) => !l)) && (
+                <div className="text-[11px] text-gray-400 italic">No links</div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column */}
+        <div className="flex flex-col gap-3">
+          {/* About Section */}
+          <div>
+            <h3 className="font-cursive text-2xl text-[#2F2F2F] mb-3 text-left">about me &lt;3</h3>
+            
+            {/* Short List */}
+            <ul className="space-y-2 mb-4">
+              <li className="flex items-start gap-2 text-[13px] text-gray-600">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#F9C6D4" xmlns="http://www.w3.org/2000/svg" className="mt-0.5 flex-shrink-0">
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                </svg>
+                <span className="leading-tight"><strong>Nghề:</strong> {occupation || '...'}</span>
+              </li>
+              <li className="flex items-start gap-2 text-[13px] text-gray-600">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#F9C6D4" xmlns="http://www.w3.org/2000/svg" className="mt-0.5 flex-shrink-0">
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                </svg>
+                <span className="leading-tight"><strong>Thích:</strong> {hobbies || '...'}</span>
+              </li>
+              <li className="flex items-start gap-2 text-[13px] text-gray-600">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#F9C6D4" xmlns="http://www.w3.org/2000/svg" className="mt-0.5 flex-shrink-0">
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                </svg>
+                <span className="leading-tight"><strong>Dáng:</strong> {appearance || '...'}</span>
+              </li>
+            </ul>
+            
+            {/* Long Text */}
+            <div className="font-serif text-[13px] leading-[1.6] text-gray-500 text-justify space-y-3">
+              <p className="break-words"><strong>About:</strong> {about || 'Thông tin chi tiết...'}</p>
+              <p className="break-words"><strong>Quá khứ:</strong> {history || 'Lịch sử...'}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Part C: Footer */}
+      <div 
+        className="w-full bg-[#2F2F2F] scalloped-top py-2 mt-3 flex justify-center items-center"
+        style={{ backgroundImage: 'radial-gradient(#444 2px, transparent 2px)', backgroundSize: '6px 6px' }}
+      >
+        <span className="text-gray-400 text-[10px] tracking-[0.2em] uppercase">by xiu.carrd.co</span>
+      </div>
+    </div>
+  );
+};
+
+export const ChocolateBotCard = ({ avatar, name, intro, shortInfo, freeText, bulletPoints, about, mediaImages, links, navButtons }: any) => {
+  return (
+    <div className="w-[92%] max-w-[500px] bg-pink-stripes shadow-[0_10px_60px_rgba(249,198,212,0.3)] mx-auto relative z-10 border-y-[6px] border-[#FDE2E4] text-[14px] leading-[1.5]">
+      
+      {/* Part A: Header */}
+      <div className="relative w-full bg-pink-bars py-6 flex flex-col items-center overflow-hidden">
+        {/* Banner */}
+        <div className="relative z-10 bg-white lace-border-thin px-6 py-2 shadow-md mx-2">
+          <h2 className="font-cursive text-xl text-[#4D2C2C] tracking-widest uppercase text-center">Welcome To...</h2>
+          {/* Decorations */}
+          <div className="absolute -left-6 top-1/2 -translate-y-1/2 text-xl">🌸</div>
+          <div className="absolute -right-6 top-1/2 -translate-y-1/2 text-xl">🌸</div>
+        </div>
+        
+        {/* Large Lace Divider */}
+        <div className="absolute bottom-0 left-0 w-full lace-border-large z-20 translate-y-1/2"></div>
+      </div>
+
+      {/* Part B: Core Profile Box */}
+      <div className="bg-[#FFF9F0] mx-4 my-6 lace-border-thin p-0.5 relative z-10">
+        <div className="bg-[#FFF9F0] flex flex-col gap-0">
+          
+          {/* Top Section: Avatar & Links */}
+          <div className="bg-[#FFF5F7] p-4 flex flex-col items-center gap-4 border-b-2 border-[#FDE2E4]">
+            {/* Avatar with Frame */}
+            <div className="relative w-full max-w-[200px] aspect-square">
+              {/* Bow on top */}
+              <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-30 text-3xl">🎀</div>
+              {/* Frame */}
+              <div className="absolute inset-0 z-20 lace-border-thin pointer-events-none border-[#F9C6D4] opacity-80"></div>
+              {/* Image */}
+              <div className="w-full h-full overflow-hidden bg-[#FFF5F7]">
+                {avatar ? (
+                  <img src={avatar} alt="Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-[#F3B4C2] text-sm">Avatar</div>
+                )}
+              </div>
+            </div>
+
+            {/* Social Links */}
+            <div className="w-full grid grid-cols-2 gap-2">
+              {links && links.slice(0, 4).map((link: string, i: number) => (
+                <div key={i} className="w-full bg-[#FFF5F7] p-1 rounded-lg border border-[#FDE2E4]">
+                  <div className="bg-[#FFF5F7] rounded-md border border-white border-opacity-60 px-2 py-1 flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-[#FDE2E4] flex items-center justify-center text-[#4D2C2C] text-[10px] shrink-0">
+                      {i === 0 ? '📱' : i === 1 ? '🐦' : i === 2 ? '📸' : '🔗'}
+                    </div>
+                    <span className="text-[#4D2C2C] text-[11px] italic font-serif truncate">{link || 'Link...'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Bottom Section: Text & Media */}
+          <div className="bg-[#FFF9F0] p-4 flex flex-col gap-4">
+            {/* Top Part */}
+            <div className="flex flex-col gap-4">
+              {/* Name & Intro */}
+              <div className="flex flex-col gap-2">
+                <h3 className="font-cursive text-3xl text-[#F3B4C2] drop-shadow-sm text-center">{name || 'Name'}</h3>
+                {/* Ribbon Info */}
+                <div className="bg-[#FDE2E4] py-1 px-4 flex justify-around items-center rounded-full shadow-inner">
+                  {shortInfo && shortInfo.map((item: string, i: number) => (
+                    <span key={i} className="text-[11px] text-[#4D2C2C] font-bold uppercase tracking-tighter">{item || '...'}</span>
+                  ))}
+                </div>
+                <p className="text-[13px] text-[#4D2C2C] text-center italic leading-relaxed">
+                  {intro || 'Short introduction goes here...'}
+                </p>
+              </div>
+
+              {/* Free Text & Bullets */}
+              <div className="flex flex-col items-center gap-2 relative">
+                <div className="text-3xl opacity-80">⛱️</div>
+                <p className="text-[12px] text-center text-[#4D2C2C] font-serif">
+                  {freeText || 'Free text area...'}
+                </p>
+                {/* Bullet Points */}
+                <ul className="mt-2 space-y-1 w-full">
+                  {bulletPoints && bulletPoints.map((point: string, i: number) => (
+                    <li key={i} className="flex items-center gap-2 text-[13px] text-[#4D2C2C]">
+                      <span className="text-[#F3B4C2] shrink-0">♥</span>
+                      <span className="break-words">{point || '...'}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="flex justify-center gap-2 py-1 opacity-40 overflow-hidden">
+              {[...Array(15)].map((_, i) => <span key={i} className="text-sm">🌸</span>)}
+            </div>
+
+            {/* About Me */}
+            <div className="flex flex-col gap-2">
+              <h4 className="font-cursive text-xl text-[#4D2C2C]">About me</h4>
+              <div className="bg-[#FFF5F7] p-3 rounded-xl shadow-inner">
+                <p className="text-[13px] text-[#4D2C2C] text-justify leading-relaxed font-serif break-words">
+                  {about || 'Detailed about me text...'}
+                </p>
+              </div>
+            </div>
+
+            {/* Media Grid */}
+            <div className="grid grid-cols-4 gap-2">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="aspect-square bg-[#FFF5F7] rounded-lg overflow-hidden border-2 border-[#FDE2E4] shadow-sm">
+                  {mediaImages && mediaImages[i] ? (
+                    <img src={mediaImages[i]} alt={`Media ${i}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[8px] text-[#F9C6D4] uppercase">Media</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Part C: Footer */}
+      <div className="relative w-full bg-pink-bars py-4 flex flex-col items-center overflow-hidden">
+        {/* Large Lace Divider (Top) */}
+        <div className="absolute top-0 left-0 w-full lace-border-large z-20 -translate-y-1/2 rotate-180"></div>
+        
+        {/* Navigation Menu */}
+        <div className="w-full flex flex-wrap justify-center items-center gap-3 px-4 relative z-10">
+          {navButtons && navButtons.map((btn: string, i: number) => (
+            <button key={i} className="bg-[#FFF9F0] border-2 border-double border-[#4D2C2C] px-4 py-1.5 text-[#4D2C2C] font-bold text-[12px] uppercase tracking-widest hover:bg-[#F9DDE3] transition-colors">
+              {btn || 'Button'}
+            </button>
+          ))}
+        </div>
+        
+        <p className="mt-3 text-[9px] text-[#F9C6D4] opacity-40 tracking-[0.2em] uppercase">by xiu.carrd.co</p>
+      </div>
+    </div>
+  );
+};
+
+export const BotCardPreview = ({ 
+  theme = 'pink',
+  avatar, 
+  name, 
+  occupation, 
+  hobbies, 
+  appearance, 
+  links, 
+  about, 
+  history,
+  // Theme 2 specific props
+  intro,
+  shortInfo,
+  freeText,
+  bulletPoints,
+  mediaImages,
+  navButtons,
+  isGalleryDetail = false
+}: any) => {
+  return (
+    <div className={`w-full flex flex-col items-center relative overflow-hidden ${isGalleryDetail ? 'mt-0' : 'mt-4'} pb-4`}>
+      <div className="w-full relative">
+        {/* Floating decoration (Only for Pink theme) */}
+        {theme === 'pink' && (
+          <div className="absolute left-0 top-[100px] z-20 opacity-80 pointer-events-none hidden sm:block">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="#F9C6D4">
+              <path d="M12 2L15 8H9L12 2Z" />
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 22L9 16H15L12 22Z" />
+              <path d="M2 12L8 9V15L2 12Z" />
+              <path d="M22 12L16 15V9L22 12Z" />
+            </svg>
+          </div>
+        )}
+
+        {theme === 'pink' ? (
+          <PinkBotCard 
+            avatar={avatar} 
+            name={name} 
+            occupation={occupation} 
+            hobbies={hobbies} 
+            appearance={appearance} 
+            links={links} 
+            about={about} 
+            history={history} 
+          />
+        ) : (
+          <ChocolateBotCard 
+            avatar={avatar}
+            name={name}
+            intro={intro}
+            shortInfo={shortInfo}
+            freeText={freeText}
+            bulletPoints={bulletPoints}
+            about={about}
+            mediaImages={mediaImages}
+            links={links}
+            navButtons={navButtons}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
 
 const TEMPLATE_1 = `◟ Nhập tên Bot Char : 
 ◟ Tuổi : 
@@ -301,194 +616,345 @@ const PREDEFINED_STYLES = [
   }
 ];
 
-interface Character {
-  id: string;
-  name: string;
-  createdAt: number;
-}
+export default function Tab1CreateBot({ onSaveComplete }: { onSaveComplete?: () => void }) {
+  const [savedCards, setSavedCards] = useState<any[]>([]);
+  const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
 
-interface Tab1CreateBotProps {
-  onSaveComplete?: () => void;
-  activeCharacterId: string;
-  characters: Character[];
-  onSelectCharacter: (id: string) => void;
-  onCreateCharacter: () => void;
-  onDeleteCharacter: (id: string) => void;
-  onUpdateName: (id: string, name: string) => void;
-}
+  const [info, setInfo] = useState(TEMPLATE_1);
+  const [personality, setPersonality] = useState(TEMPLATE_2);
+  const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
+  const [customStyle, setCustomStyle] = useState('');
+  
+  // Card states
+  const [cardAvatar, setCardAvatar] = useState('');
+  const [cardName, setCardName] = useState('');
+  const [cardOccupation, setCardOccupation] = useState('');
+  const [cardHobbies, setCardHobbies] = useState('');
+  const [cardAppearance, setCardAppearance] = useState('');
+  const [cardAbout, setCardAbout] = useState('');
+  const [cardHistory, setCardHistory] = useState('');
+  const [cardTheme, setCardTheme] = useState('pink');
+  const [cardIntro, setCardIntro] = useState('');
+  const [cardShortInfo, setCardShortInfo] = useState<string[]>(["", "", ""]);
+  const [cardFreeText, setCardFreeText] = useState('');
+  const [cardBulletPoints, setCardBulletPoints] = useState<string[]>(["", "", "", ""]);
+  const [cardMediaImages, setCardMediaImages] = useState<string[]>(["", "", "", ""]);
+  const [cardNavButtons, setCardNavButtons] = useState<string[]>(["Home", "Interests", "Art Comms"]);
+  const [cardLinks, setCardLinks] = useState<string[]>(["", "", ""]);
 
-export default function Tab1CreateBot({ 
-  onSaveComplete, 
-  activeCharacterId, 
-  characters, 
-  onSelectCharacter, 
-  onCreateCharacter, 
-  onDeleteCharacter,
-  onUpdateName
-}: Tab1CreateBotProps) {
-  // Helper for character-specific keys
-  const getCharKey = (key: string) => `${key}_${activeCharacterId}`;
-
-  const [info, setInfo] = useState(() => localStorage.getItem(getCharKey('banhnho_bot_info')) || TEMPLATE_1);
-  const [personality, setPersonality] = useState(() => localStorage.getItem(getCharKey('banhnho_bot_personality')) || TEMPLATE_2);
-  const [selectedStyles, setSelectedStyles] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(getCharKey('banhnho_bot_style_selected'));
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [customStyle, setCustomStyle] = useState(() => localStorage.getItem(getCharKey('banhnho_bot_style_custom')) || '');
-  const [carrdBio, setCarrdBio] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_bio')) || '');
-  const [carrdDescription, setCarrdDescription] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_description')) || '');
-  const [carrdName, setCarrdName] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_name')) || '');
-  const [carrdAge, setCarrdAge] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_age')) || '');
-  const [carrdHobbies, setCarrdHobbies] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_hobbies')) || '');
-  const [carrdAppearance, setCarrdAppearance] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_appearance')) || '');
-  const [carrdGame, setCarrdGame] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_game')) || '');
-  const [carrdMovies, setCarrdMovies] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_movies')) || '');
-  const [carrdReview, setCarrdReview] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_review')) || '');
-  const [carrdJob, setCarrdJob] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_job')) || '');
-  const [carrdSocials, setCarrdSocials] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_socials')) || '');
-  const [carrdIntro, setCarrdIntro] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_intro')) || '');
-  const [carrdPast, setCarrdPast] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_past')) || '');
-  const [carrdMustKnow, setCarrdMustKnow] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_must_know')) || '');
-  const [carrdLifeSummary, setCarrdLifeSummary] = useState(() => localStorage.getItem(getCharKey('banhnho_carrd_life_summary')) || '');
   const [isSaved, setIsSaved] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  // Update state when activeCharacterId changes
+  // Load initial data from IndexedDB
   useEffect(() => {
-    setInfo(localStorage.getItem(getCharKey('banhnho_bot_info')) || TEMPLATE_1);
-    setPersonality(localStorage.getItem(getCharKey('banhnho_bot_personality')) || TEMPLATE_2);
-    const savedStyles = localStorage.getItem(getCharKey('banhnho_bot_style_selected'));
-    setSelectedStyles(savedStyles ? JSON.parse(savedStyles) : []);
-    setCustomStyle(localStorage.getItem(getCharKey('banhnho_bot_style_custom')) || '');
-    
-    setCarrdName(localStorage.getItem(getCharKey('banhnho_carrd_name')) || '');
-    setCarrdBio(localStorage.getItem(getCharKey('banhnho_carrd_bio')) || '');
-    setCarrdDescription(localStorage.getItem(getCharKey('banhnho_carrd_description')) || '');
-    setCarrdAge(localStorage.getItem(getCharKey('banhnho_carrd_age')) || '');
-    setCarrdHobbies(localStorage.getItem(getCharKey('banhnho_carrd_hobbies')) || '');
-    setCarrdAppearance(localStorage.getItem(getCharKey('banhnho_carrd_appearance')) || '');
-    setCarrdGame(localStorage.getItem(getCharKey('banhnho_carrd_game')) || '');
-    setCarrdMovies(localStorage.getItem(getCharKey('banhnho_carrd_movies')) || '');
-    setCarrdReview(localStorage.getItem(getCharKey('banhnho_carrd_review')) || '');
-    setCarrdJob(localStorage.getItem(getCharKey('banhnho_carrd_job')) || '');
-    setCarrdSocials(localStorage.getItem(getCharKey('banhnho_carrd_socials')) || '');
-    setCarrdIntro(localStorage.getItem(getCharKey('banhnho_carrd_intro')) || '');
-    setCarrdPast(localStorage.getItem(getCharKey('banhnho_carrd_past')) || '');
-    setCarrdMustKnow(localStorage.getItem(getCharKey('banhnho_carrd_must_know')) || '');
-    setCarrdLifeSummary(localStorage.getItem(getCharKey('banhnho_carrd_life_summary')) || '');
-  }, [activeCharacterId]);
+    const init = async () => {
+      const cards = await loadCards();
+      setSavedCards(cards);
 
-  const charSafeSetItem = (key: string, value: string) => {
-    try { localStorage.setItem(getCharKey(key), value); } catch (e) { console.error('Storage full'); }
-  };
+      const savedIndex = localStorage.getItem('banhnho_bot_card_selected_index');
+      const index = savedIndex !== null ? parseInt(savedIndex, 10) : null;
+      setSelectedCardIndex(index);
 
-  // Removed auto-save useEffects to prevent data corruption on character switch
-  // Data is now saved explicitly via handleSave button
+      const draftInfo = await loadDraft('info');
+      if (draftInfo !== undefined) setInfo(draftInfo);
+      
+      const draftPersonality = await loadDraft('personality');
+      if (draftPersonality !== undefined) setPersonality(draftPersonality);
 
-  const handleSave = () => {
-    // Save all current state to localStorage for the active character
-    charSafeSetItem('banhnho_bot_info', info);
-    charSafeSetItem('banhnho_bot_personality', personality);
-    charSafeSetItem('banhnho_bot_style_selected', JSON.stringify(selectedStyles));
-    charSafeSetItem('banhnho_bot_style_custom', customStyle);
-    charSafeSetItem('banhnho_carrd_bio', carrdBio);
-    charSafeSetItem('banhnho_carrd_description', carrdDescription);
-    charSafeSetItem('banhnho_carrd_name', carrdName);
-    charSafeSetItem('banhnho_carrd_age', carrdAge);
-    charSafeSetItem('banhnho_carrd_hobbies', carrdHobbies);
-    charSafeSetItem('banhnho_carrd_appearance', carrdAppearance);
-    charSafeSetItem('banhnho_carrd_game', carrdGame);
-    charSafeSetItem('banhnho_carrd_movies', carrdMovies);
-    charSafeSetItem('banhnho_carrd_review', carrdReview);
-    charSafeSetItem('banhnho_carrd_job', carrdJob);
-    charSafeSetItem('banhnho_carrd_socials', carrdSocials);
-    charSafeSetItem('banhnho_carrd_intro', carrdIntro);
-    charSafeSetItem('banhnho_carrd_past', carrdPast);
-    charSafeSetItem('banhnho_carrd_must_know', carrdMustKnow);
-    charSafeSetItem('banhnho_carrd_life_summary', carrdLifeSummary);
+      const draftStyles = await loadDraft('style_selected');
+      if (draftStyles !== undefined) setSelectedStyles(draftStyles);
 
+      const draftCustomStyle = await loadDraft('style_custom');
+      if (draftCustomStyle !== undefined) setCustomStyle(draftCustomStyle);
+
+      const draftAvatar = await loadDraft('card_avatar');
+      if (draftAvatar !== undefined) setCardAvatar(draftAvatar);
+
+      const draftName = await loadDraft('card_name');
+      if (draftName !== undefined) setCardName(draftName);
+
+      const draftOccupation = await loadDraft('card_occupation');
+      if (draftOccupation !== undefined) setCardOccupation(draftOccupation);
+
+      const draftHobbies = await loadDraft('card_hobbies');
+      if (draftHobbies !== undefined) setCardHobbies(draftHobbies);
+
+      const draftAppearance = await loadDraft('card_appearance');
+      if (draftAppearance !== undefined) setCardAppearance(draftAppearance);
+
+      const draftAbout = await loadDraft('card_about');
+      if (draftAbout !== undefined) setCardAbout(draftAbout);
+
+      const draftHistory = await loadDraft('card_history');
+      if (draftHistory !== undefined) setCardHistory(draftHistory);
+
+      const draftTheme = await loadDraft('card_theme');
+      if (draftTheme !== undefined) setCardTheme(draftTheme);
+
+      const draftIntro = await loadDraft('card_intro');
+      if (draftIntro !== undefined) setCardIntro(draftIntro);
+
+      const draftShortInfo = await loadDraft('card_short_info');
+      if (draftShortInfo !== undefined) setCardShortInfo(draftShortInfo);
+
+      const draftFreeText = await loadDraft('card_free_text');
+      if (draftFreeText !== undefined) setCardFreeText(draftFreeText);
+
+      const draftBulletPoints = await loadDraft('card_bullet_points');
+      if (draftBulletPoints !== undefined) setCardBulletPoints(draftBulletPoints);
+
+      const draftMediaImages = await loadDraft('card_media_images');
+      if (draftMediaImages !== undefined) setCardMediaImages(draftMediaImages);
+
+      const draftNavButtons = await loadDraft('card_nav_buttons');
+      if (draftNavButtons !== undefined) setCardNavButtons(draftNavButtons);
+
+      const draftLinks = await loadDraft('card_links');
+      if (draftLinks !== undefined) setCardLinks(draftLinks);
+
+      setIsLoaded(true);
+    };
+    init();
+  }, []);
+
+  // Save draft states to IndexedDB
+  useEffect(() => { if (isLoaded) saveDraft('info', info); }, [info, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('personality', personality); }, [personality, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('style_selected', selectedStyles); }, [selectedStyles, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('style_custom', customStyle); }, [customStyle, isLoaded]);
+  
+  // Card effects
+  useEffect(() => { if (isLoaded) saveDraft('card_avatar', cardAvatar); }, [cardAvatar, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_name', cardName); }, [cardName, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_occupation', cardOccupation); }, [cardOccupation, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_hobbies', cardHobbies); }, [cardHobbies, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_appearance', cardAppearance); }, [cardAppearance, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_about', cardAbout); }, [cardAbout, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_history', cardHistory); }, [cardHistory, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_theme', cardTheme); }, [cardTheme, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_intro', cardIntro); }, [cardIntro, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_short_info', cardShortInfo); }, [cardShortInfo, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_free_text', cardFreeText); }, [cardFreeText, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_bullet_points', cardBulletPoints); }, [cardBulletPoints, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_media_images', cardMediaImages); }, [cardMediaImages, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_nav_buttons', cardNavButtons); }, [cardNavButtons, isLoaded]);
+  useEffect(() => { if (isLoaded) saveDraft('card_links', cardLinks); }, [cardLinks, isLoaded]);
+
+  useEffect(() => {
+    if (isLoaded) {
+      if (selectedCardIndex !== null) {
+        localStorage.setItem('banhnho_bot_card_selected_index', selectedCardIndex.toString());
+      } else {
+        localStorage.removeItem('banhnho_bot_card_selected_index');
+      }
+    }
+  }, [selectedCardIndex, isLoaded]);
+
+  useEffect(() => {
+    if (isLoaded) {
+      const match = info.match(/◟Tên:\s*(.*)/i);
+      if (match && match[1] && match[1].trim()) {
+        setCardName(match[1].trim());
+      }
+    }
+  }, [info, isLoaded]);
+
+  useEffect(() => {
     const combinedStyle = [
       ...selectedStyles.map(id => PREDEFINED_STYLES.find(s => s.id === id)?.content).filter(Boolean),
       customStyle
     ].filter(Boolean).join('\n\n');
-    charSafeSetItem('banhnho_bot_style', combinedStyle);
+    if (isLoaded) saveDraft('bot_style', combinedStyle);
+  }, [selectedStyles, customStyle, isLoaded]);
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: (val: string) => void) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setter(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSelectCard = (index: number) => {
+    const card = savedCards[index];
+    if (card) {
+      setCardAvatar(card.avatar || '');
+      setCardName(card.name || '');
+      setCardOccupation(card.occupation || '');
+      setCardHobbies(card.hobbies || '');
+      setCardAppearance(card.appearance || '');
+      setCardAbout(card.about || '');
+      setCardHistory(card.history || '');
+      setCardTheme(card.theme || 'pink');
+      setCardIntro(card.intro || '');
+      setCardShortInfo(card.shortInfo || ["", "", ""]);
+      setCardFreeText(card.freeText || '');
+      setCardBulletPoints(card.bulletPoints || ["", "", "", ""]);
+      setCardMediaImages(card.mediaImages || ["", "", "", ""]);
+      setCardNavButtons(card.navButtons || ["Home", "Interests", "Art Comms"]);
+      setCardLinks(card.links || ["", "", ""]);
+      setSelectedCardIndex(index);
+    }
+  };
+
+  const handleCreateNewCard = () => {
+    setCardAvatar('');
+    setCardName('');
+    setCardOccupation('');
+    setCardHobbies('');
+    setCardAppearance('');
+    setCardAbout('');
+    setCardHistory('');
+    setCardTheme('pink');
+    setCardIntro('');
+    setCardShortInfo(["", "", ""]);
+    setCardFreeText('');
+    setCardBulletPoints(["", "", "", ""]);
+    setCardMediaImages(["", "", "", ""]);
+    setCardNavButtons(["Home", "Interests", "Art Comms"]);
+    setCardLinks(["", "", ""]);
+    setSelectedCardIndex(null);
+  };
+
+  const handleSave = async () => {
+    try {
+      const currentCards = [...savedCards];
+      const newCard = {
+        avatar: cardAvatar,
+        name: cardName,
+        occupation: cardOccupation,
+        hobbies: cardHobbies,
+        appearance: cardAppearance,
+        about: cardAbout,
+        history: cardHistory,
+        theme: cardTheme,
+        intro: cardIntro,
+        shortInfo: cardShortInfo,
+        freeText: cardFreeText,
+        bulletPoints: cardBulletPoints,
+        mediaImages: cardMediaImages,
+        navButtons: cardNavButtons,
+        links: cardLinks
+      };
+
+      if (selectedCardIndex !== null) {
+        currentCards[selectedCardIndex] = newCard;
+      } else {
+        currentCards.push(newCard);
+        setSelectedCardIndex(currentCards.length - 1);
+      }
+      
+      setSavedCards(currentCards);
+      await saveCards(currentCards);
+    } catch (e) {
+      console.error("Failed to save card", e);
+    }
 
     setIsSaved(true);
     setShowToast(true);
     setTimeout(() => {
       setShowToast(false);
-      if (onSaveComplete) onSaveComplete();
-    }, 2000);
+    }, 1500);
     setTimeout(() => setIsSaved(false), 2000);
   };
 
   return (
     <div className="p-4 max-w-4xl mx-auto space-y-8 pb-24 font-sans text-[#8A7D85]">
-      {/* Character Manager */}
-      <div className="bg-white/60 border border-[#F9C6D4]/30 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-[#8A7D85] flex items-center gap-2">
-            <Users size={20} /> Danh sách nhân vật
-          </h3>
+      {/* Header */}
+      <div className="text-center space-y-2 mb-8 relative">
+        <h2 className="text-3xl font-bold text-[#8A7D85] drop-shadow-[0_0_12px_rgba(249,198,212,0.35)]">Tạo Bot Char Chuyên Nghiệp</h2>
+        <p className="text-[#9E919A] opacity-80">Thiết lập chi tiết nhân vật của bạn</p>
+        <button 
+          onClick={() => onSaveComplete && onSaveComplete()}
+          className="absolute top-0 right-0 bg-white/80 backdrop-blur-md px-4 py-2 rounded-xl text-sm font-bold text-[#F3B4C2] shadow-sm border border-[#F9C6D4] hover:bg-[#FDF2F5] transition-colors"
+        >
+          Xem Trưng Bày Thẻ
+        </button>
+      </div>
+
+      {/* Theme Selection - Thanh thẻ 1 & 2 */}
+      <div className="bg-[rgba(255,255,255,0.65)] backdrop-blur-md border border-[rgba(249,221,227,0.5)] shadow-[0_4px_20px_rgba(228,219,214,0.4)] rounded-2xl p-6 relative overflow-hidden">
+        <div className="absolute inset-0 bg-[#F9C6D4] opacity-10 mix-blend-soft-light pointer-events-none"></div>
+        <h3 className="text-xl font-bold text-[#8A7D85] mb-4 flex items-center gap-2 relative z-10">
+          <span className="bg-[#F3C6D1]/50 px-3 py-1 rounded-lg shadow-sm text-sm">CHỌN KIỂU KHUNG</span>
+        </h3>
+        <div className="flex flex-col sm:flex-row gap-4 relative z-10">
           <button 
-            onClick={onCreateCharacter}
-            className="bg-[#F3B4C2] text-white p-2 rounded-full hover:bg-[#F9C6D4] transition-all shadow-md active:scale-95"
-            title="Tạo nhân vật mới"
+            onClick={() => setCardTheme('pink')}
+            className={`flex-1 py-4 rounded-2xl border-2 transition-all font-bold text-lg flex flex-col items-center gap-1 ${
+              cardTheme === 'pink' 
+                ? 'bg-[#F9C6D4] border-[#F3B4C2] text-white shadow-[0_0_15px_rgba(249,198,212,0.5)] scale-[1.02]' 
+                : 'bg-white border-gray-200 text-gray-400 hover:border-[#F9C6D4] hover:bg-[#FDF2F5]'
+            }`}
           >
-            <Plus size={24} />
+            <span>Thanh thẻ 1</span>
+            <span className="text-xs font-normal opacity-80">Phong cách Pink Gothic</span>
           </button>
-        </div>
-        
-        <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-          {characters.map((char) => (
-            <div 
-              key={char.id}
-              className={`flex items-center gap-2 min-w-[160px] p-2 rounded-xl border transition-all cursor-pointer relative ${
-                activeCharacterId === char.id 
-                  ? 'bg-[#F9DDE3] border-[#F3C6D1] shadow-sm ring-1 ring-[#F3C6D1]' 
-                  : 'bg-[#FEF9E7] border-[#F9E79F] hover:bg-[#FFF9C4]'
-              }`}
-              onClick={() => onSelectCharacter(char.id)}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1">
-                  {activeCharacterId === char.id && <div className="w-1.5 h-1.5 rounded-full bg-[#F3B4C2] animate-pulse"></div>}
-                  <input 
-                    type="text"
-                    value={char.name}
-                    onChange={(e) => onUpdateName(char.id, e.target.value)}
-                    className="bg-transparent border-none p-0 text-xs font-bold text-[#8A7D85] focus:ring-0 w-full"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </div>
-              </div>
-              {characters.length > 1 && (
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (confirm(`Bạn có chắc muốn xóa nhân vật "${char.name}"?`)) {
-                      onDeleteCharacter(char.id);
-                    }
-                  }}
-                  className="text-[#9E919A] hover:text-red-400 p-1"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </div>
-          ))}
+          <button 
+            onClick={() => setCardTheme('chocolate')}
+            className={`flex-1 py-4 rounded-2xl border-2 transition-all font-bold text-lg flex flex-col items-center gap-1 ${
+              cardTheme === 'chocolate' 
+                ? 'bg-[#4D2C2C] border-[#3D1F1F] text-[#F9C6D4] shadow-[0_0_15px_rgba(77,44,44,0.3)] scale-[1.02]' 
+                : 'bg-white border-gray-200 text-gray-400 hover:border-[#4D2C2C] hover:bg-[#F5F1F1]'
+            }`}
+          >
+            <span>Thanh thẻ 2</span>
+            <span className="text-xs font-normal opacity-80">Phong cách Chocolate Lolita</span>
+          </button>
         </div>
       </div>
 
-      {/* Header */}
-      <div className="text-center space-y-2 mb-8">
-        <h2 className="text-3xl font-bold text-[#8A7D85] drop-shadow-[0_0_12px_rgba(249,198,212,0.35)]">Tạo Bot Char Chuyên Nghiệp</h2>
-        <p className="text-[#9E919A] opacity-80">Thiết lập chi tiết nhân vật của bạn</p>
+      {/* Card Management */}
+      <div className="bg-[rgba(255,255,255,0.65)] backdrop-blur-md border border-[rgba(249,221,227,0.5)] shadow-[0_4px_20px_rgba(228,219,214,0.4)] rounded-2xl p-4 relative overflow-hidden">
+        <div className="absolute inset-0 bg-[#F9C6D4] opacity-10 mix-blend-soft-light pointer-events-none"></div>
+        <div className="flex items-center gap-3 overflow-x-auto pb-2 relative z-10 scrollbar-thin scrollbar-thumb-[#F9C6D4] scrollbar-track-transparent">
+          <button
+            onClick={handleCreateNewCard}
+            className={`shrink-0 flex flex-col items-center justify-center px-4 py-2 rounded-xl border-2 border-dashed transition-all gap-1 ${
+              selectedCardIndex === null 
+                ? 'border-[#F3B4C2] bg-[#FDF2F5] text-[#F3B4C2] shadow-inner' 
+                : 'border-[#E4D5DC] text-[#9E919A] hover:border-[#F3B4C2] hover:text-[#F3B4C2]'
+            }`}
+            title="Tạo thẻ mới"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span className="text-[10px] font-bold uppercase">Thêm Mới</span>
+          </button>
+          
+          <div className="h-10 w-[1px] bg-[#F9C6D4]/30 shrink-0 mx-1"></div>
+
+          {savedCards.map((card, index) => (
+            <button
+              key={index}
+              onClick={() => handleSelectCard(index)}
+              className={`shrink-0 px-5 py-3 rounded-xl font-bold text-sm transition-all shadow-sm border flex flex-col items-center gap-0.5 ${
+                selectedCardIndex === index
+                  ? 'bg-[#F9C6D4] text-white border-[#F3B4C2] shadow-md scale-105' 
+                  : 'bg-[#FFF9C4] text-[#8A7D85] border-[#FFF59D] hover:bg-[#FFF59D]' 
+              }`}
+            >
+              <span className="truncate max-w-[100px]">
+                {selectedCardIndex === index ? (cardName || card.name || `Nhân vật ${index + 1}`) : (card.name || `Nhân vật ${index + 1}`)}
+              </span>
+              <span className="text-[9px] font-normal opacity-70 uppercase tracking-wider">
+                {card.theme === 'chocolate' ? 'Thanh thẻ 2' : 'Thanh thẻ 1'}
+              </span>
+            </button>
+          ))}
+
+          {selectedCardIndex === null && (
+            <div className="shrink-0 px-4 py-3 rounded-xl border border-[#F3B4C2] bg-white/50 text-[#F3B4C2] text-sm font-bold italic animate-pulse flex flex-col items-center gap-0.5">
+              <span className="truncate max-w-[100px]">{cardName || 'Thẻ mới...'}</span>
+              <span className="text-[9px] font-normal opacity-70 uppercase tracking-wider">
+                {cardTheme === 'chocolate' ? 'Thanh thẻ 2' : 'Thanh thẻ 1'}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Card 1: Thông tin cơ bản */}
@@ -578,181 +1044,294 @@ export default function Tab1CreateBot({
         </div>
       </div>
       
-      {/* Card 4: Carrd Profile Display */}
+      {/* Card 4: Thẻ Bot Character */}
       <div className="bg-[rgba(255,255,255,0.65)] backdrop-blur-md border border-[rgba(249,221,227,0.5)] shadow-[0_4px_20px_rgba(228,219,214,0.4)] rounded-2xl p-6 relative overflow-hidden">
         <div className="absolute inset-0 bg-[#F9C6D4] opacity-10 mix-blend-soft-light pointer-events-none"></div>
         <h3 className="text-xl font-bold text-[#8A7D85] mb-4 flex items-center gap-2 drop-shadow-[0_0_12px_rgba(249,198,212,0.35)]">
-          <span className="bg-[#F3C6D1]/50 px-3 py-1 rounded-lg shadow-sm">Ô 4</span> Nội dung hiển thị trên Thẻ Card (Showcase)
+          <span className="bg-[#F3C6D1]/50 px-3 py-1 rounded-lg shadow-sm">Ô 4</span> Thiết kế Thẻ Bot Character
         </h3>
         
-        <div className="space-y-4 relative z-10">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-[#8A7D85] mb-2">Tên xuất hiện trên thẻ card:</label>
-              <input 
-                type="text"
-                value={carrdName}
-                onChange={(e) => setCarrdName(e.target.value)}
-                className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-                placeholder="Ví dụ: Ren"
-              />
+        <div className="space-y-6 relative z-10">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Tên Nhân Vật</label>
+                <input 
+                  type="text" 
+                  value={cardName}
+                  onChange={(e) => setCardName(e.target.value)}
+                  className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] placeholder:text-[#9E919A]"
+                  placeholder="Nhập tên nhân vật..."
+                />
+              </div>
+
+              {cardTheme === 'pink' ? (
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Nghề nghiệp</label>
+                    <input 
+                      type="text" 
+                      value={cardOccupation}
+                      onChange={(e) => setCardOccupation(e.target.value)}
+                      className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] placeholder:text-[#9E919A]"
+                      placeholder="Nhập nghề nghiệp..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Sở Thích</label>
+                    <input 
+                      type="text" 
+                      value={cardHobbies}
+                      onChange={(e) => setCardHobbies(e.target.value)}
+                      className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] placeholder:text-[#9E919A]"
+                      placeholder="Nhập sở thích..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Ngoại hình</label>
+                    <input 
+                      type="text" 
+                      value={cardAppearance}
+                      onChange={(e) => setCardAppearance(e.target.value)}
+                      className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] placeholder:text-[#9E919A]"
+                      placeholder="Nhập ngoại hình..."
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Giới thiệu ngắn (Intro)</label>
+                    <input 
+                      type="text" 
+                      value={cardIntro}
+                      onChange={(e) => setCardIntro(e.target.value)}
+                      className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] placeholder:text-[#9E919A]"
+                      placeholder="Nhập giới thiệu ngắn..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Thông tin ngắn (3 mục)</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {cardShortInfo.map((val, i) => (
+                        <input 
+                          key={i}
+                          type="text" 
+                          value={val}
+                          onChange={(e) => {
+                            const newInfo = [...cardShortInfo];
+                            newInfo[i] = e.target.value;
+                            setCardShortInfo(newInfo);
+                          }}
+                          className="w-full p-2 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-lg text-xs text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
+                          placeholder={`Mục ${i+1}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Đoạn văn tự do (Góc Umbrella)</label>
+                    <input 
+                      type="text" 
+                      value={cardFreeText}
+                      onChange={(e) => setCardFreeText(e.target.value)}
+                      className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] placeholder:text-[#9E919A]"
+                      placeholder="Nhập text tự do..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Danh sách 4 dòng (Bullet points)</label>
+                    <div className="space-y-2">
+                      {cardBulletPoints.map((val, i) => (
+                        <input 
+                          key={i}
+                          type="text" 
+                          value={val}
+                          onChange={(e) => {
+                            const newPoints = [...cardBulletPoints];
+                            newPoints[i] = e.target.value;
+                            setCardBulletPoints(newPoints);
+                          }}
+                          className="w-full p-2 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-lg text-sm text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
+                          placeholder={`Dòng ${i+1}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-sm font-semibold text-[#8A7D85] mb-2">About về char</label>
+                <textarea 
+                  value={cardAbout}
+                  onChange={(e) => setCardAbout(e.target.value)}
+                  className="w-full h-[100px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] resize-y placeholder:text-[#9E919A]"
+                  placeholder="Nhập about..."
+                />
+              </div>
+
+              {cardTheme === 'pink' && (
+                <div>
+                  <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Lịch sử quá khứ</label>
+                  <textarea 
+                    value={cardHistory}
+                    onChange={(e) => setCardHistory(e.target.value)}
+                    className="w-full h-[100px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] resize-y placeholder:text-[#9E919A]"
+                    placeholder="Nhập lịch sử quá khứ..."
+                  />
+                </div>
+              )}
             </div>
-            <div>
-              <label className="block text-sm font-bold text-[#8A7D85] mb-2">Tuổi:</label>
-              <input 
-                type="text"
-                value={carrdAge}
-                onChange={(e) => setCarrdAge(e.target.value)}
-                className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-                placeholder="Ví dụ: 20"
-              />
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Ảnh Đại Diện (Tỉ lệ 1:1)</label>
+                <input 
+                  type="file" 
+                  accept="image/*"
+                  onChange={(e) => handleImageUpload(e, setCardAvatar)}
+                  className="w-full text-sm text-[#8A7D85] file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-[#F9DDE3] file:text-[#8A7D85] hover:file:bg-[#F3C6D1] cursor-pointer"
+                />
+              </div>
+
+              {cardTheme === 'chocolate' && (
+                <div>
+                  <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Ảnh Media Grid (4 ảnh)</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[0, 1, 2, 3].map((i) => (
+                      <div key={i} className="space-y-1">
+                        <label htmlFor={`media-upload-${i}`} className="cursor-pointer group block">
+                          <div className="w-full aspect-square bg-gray-100 rounded-lg overflow-hidden border border-dashed border-gray-300 flex flex-col items-center justify-center group-hover:bg-gray-200 transition-colors">
+                            {cardMediaImages[i] ? (
+                              <img src={cardMediaImages[i]} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <>
+                                <span className="text-[10px] text-gray-400">Ảnh {i+1}</span>
+                                <span className="text-[8px] text-gray-300">Click để chọn</span>
+                              </>
+                            )}
+                          </div>
+                        </label>
+                        <input 
+                          id={`media-upload-${i}`}
+                          type="file" 
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                const newImages = [...cardMediaImages];
+                                newImages[i] = reader.result as string;
+                                setCardMediaImages(newImages);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Liên kết Mạng xã hội (Tối đa 4)</label>
+                <div className="space-y-2">
+                  {cardLinks.map((link, i) => (
+                    <input 
+                      key={i}
+                      type="text" 
+                      value={link}
+                      onChange={(e) => {
+                        const newLinks = [...cardLinks];
+                        newLinks[i] = e.target.value;
+                        setCardLinks(newLinks);
+                      }}
+                      className="w-full p-2 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-lg text-sm text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
+                      placeholder={`Link ${i + 1}...`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {cardTheme === 'chocolate' && (
+                <div>
+                  <label className="block text-sm font-semibold text-[#8A7D85] mb-2">Tên 3 nút điều hướng</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {cardNavButtons.map((val, i) => (
+                      <input 
+                        key={i}
+                        type="text" 
+                        value={val}
+                        onChange={(e) => {
+                          const newBtns = [...cardNavButtons];
+                          newBtns[i] = e.target.value;
+                          setCardNavButtons(newBtns);
+                        }}
+                        className="w-full p-2 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-lg text-xs text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
+                        placeholder={`Nút ${i+1}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-[#8A7D85] mb-2">Nghề nghiệp:</label>
-              <input 
-                type="text"
-                value={carrdJob}
-                onChange={(e) => setCarrdJob(e.target.value)}
-                className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-                placeholder="Ví dụ: Sinh viên"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-[#8A7D85] mb-2">Tài khoản mạng xã hội:</label>
-              <input 
-                type="text"
-                value={carrdSocials}
-                onChange={(e) => setCarrdSocials(e.target.value)}
-                className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-                placeholder="Ví dụ: @ren_insta, fb.com/ren..."
-              />
-            </div>
+          <div className="mt-8 pt-6 border-t border-[#E9C9D2]/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <h4 className="font-bold text-[#8A7D85]">Xem trước thẻ:</h4>
+            {selectedCardIndex !== null && (
+              <button
+                onClick={async () => {
+                  if (window.confirm('Bạn có chắc chắn muốn xóa thẻ này không?')) {
+                    const newCards = [...savedCards];
+                    newCards.splice(selectedCardIndex, 1);
+                    setSavedCards(newCards);
+                    await saveCards(newCards);
+                    handleCreateNewCard();
+                  }
+                }}
+                className="text-xs font-bold text-red-400 hover:text-red-600 flex items-center gap-1 bg-red-50 px-3 py-1.5 rounded-lg border border-red-100 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                Xóa thẻ hiện tại
+              </button>
+            )}
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-[#8A7D85] mb-2">About me:</label>
-            <textarea 
-              value={carrdBio}
-              onChange={(e) => setCarrdBio(e.target.value)}
-              className="w-full h-[80px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3] resize-none"
-              placeholder="Mỗi dòng 1 đặc điểm ngắn gọn..."
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-[#8A7D85] mb-2">Sở thích:</label>
-              <textarea 
-                value={carrdHobbies}
-                onChange={(e) => setCarrdHobbies(e.target.value)}
-                className="w-full h-[100px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-                placeholder="Nhập sở thích..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-[#8A7D85] mb-2">Ngoại hình:</label>
-              <textarea 
-                value={carrdAppearance}
-                onChange={(e) => setCarrdAppearance(e.target.value)}
-                className="w-full h-[100px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-                placeholder="Mô tả ngoại hình..."
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-[#8A7D85] mb-2">Game:</label>
-              <input 
-                type="text"
-                value={carrdGame}
-                onChange={(e) => setCarrdGame(e.target.value)}
-                className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-                placeholder="Game yêu thích..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-[#8A7D85] mb-2">Phim:</label>
-              <input 
-                type="text"
-                value={carrdMovies}
-                onChange={(e) => setCarrdMovies(e.target.value)}
-                className="w-full p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-                placeholder="Phim yêu thích..."
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-[#8A7D85] mb-2">Giới thiệu về bản thân (bot char):</label>
-            <textarea 
-              value={carrdIntro}
-              onChange={(e) => setCarrdIntro(e.target.value)}
-              className="w-full h-[100px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-              placeholder="Giới thiệu chi tiết về bot..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-[#8A7D85] mb-2">Quá khứ:</label>
-            <textarea 
-              value={carrdPast}
-              onChange={(e) => setCarrdPast(e.target.value)}
-              className="w-full h-[100px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-              placeholder="Mô tả quá khứ..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-[#8A7D85] mb-2">Những điều bạn cần biết về bot char:</label>
-            <textarea 
-              value={carrdMustKnow}
-              onChange={(e) => setCarrdMustKnow(e.target.value)}
-              className="w-full h-[100px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-              placeholder="Lưu ý quan trọng..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-[#8A7D85] mb-2">Sơ lược về cuộc đời:</label>
-            <textarea 
-              value={carrdLifeSummary}
-              onChange={(e) => setCarrdLifeSummary(e.target.value)}
-              className="w-full h-[100px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-              placeholder="Tóm tắt cuộc đời..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-[#8A7D85] mb-2">Đánh giá tổng quan:</label>
-            <textarea 
-              value={carrdReview}
-              onChange={(e) => setCarrdReview(e.target.value)}
-              className="w-full h-[80px] p-3 bg-[#F3C6D1]/50 border border-[#F3C6D1] rounded-xl text-[#8A7D85] focus:outline-none focus:ring-2 focus:ring-[#F9DDE3]"
-              placeholder="Đánh giá ngắn gọn..."
+          <div className="mt-4">
+            <BotCardPreview 
+              theme={cardTheme}
+              avatar={cardAvatar}
+              name={cardName}
+              occupation={cardOccupation}
+              hobbies={cardHobbies}
+              appearance={cardAppearance}
+              about={cardAbout}
+              history={cardHistory}
+              links={cardLinks}
+              intro={cardIntro}
+              shortInfo={cardShortInfo}
+              freeText={cardFreeText}
+              bulletPoints={cardBulletPoints}
+              mediaImages={cardMediaImages}
+              navButtons={cardNavButtons}
             />
           </div>
         </div>
       </div>
       
-      {/* Save & Showcase Buttons */}
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
+      {/* Save Button */}
+      <div className="flex justify-center mt-8">
         <button 
           onClick={handleSave}
           disabled={isSaved}
-          className={`w-full sm:w-auto px-10 py-4 text-white font-bold rounded-full shadow-[0_0_12px_rgba(249,198,212,0.5)] transition-all ${isSaved ? 'bg-[#4CAF50]' : 'bg-gradient-to-r from-[#F9DDE3] to-[#F3C6D1] hover:scale-105 active:scale-95'}`}
+          className={`px-10 py-4 text-white font-bold rounded-full shadow-[0_0_12px_rgba(249,198,212,0.5)] transition-all ${isSaved ? 'bg-[#4CAF50]' : 'bg-gradient-to-r from-[#F9DDE3] to-[#F3C6D1] hover:scale-105 active:scale-95'}`}
         >
           {isSaved ? '✓ Đã lưu thiết lập' : 'Lưu Thiết Lập Bot'}
-        </button>
-        
-        <button 
-          onClick={() => onSaveComplete?.()}
-          className="w-full sm:w-auto px-10 py-4 bg-white text-[#8A7D85] font-bold rounded-full border-2 border-[#F9C6D4] shadow-sm hover:bg-[#FDF2F5] transition-all active:scale-95"
-        >
-          Xem Trưng Bày
         </button>
       </div>
 

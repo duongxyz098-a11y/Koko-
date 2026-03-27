@@ -1,17 +1,35 @@
 export const initKeyValueDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('BanhNhoKV', 3);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+    const request = indexedDB.open('BanhNhoKV');
+    
     request.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains('backgrounds')) {
         db.createObjectStore('backgrounds');
       }
-      if (!db.objectStoreNames.contains('profile_photos')) {
-        db.createObjectStore('profile_photos');
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('backgrounds')) {
+        const currentVersion = db.version;
+        db.close();
+        
+        const upgradeReq = indexedDB.open('BanhNhoKV', currentVersion + 1);
+        upgradeReq.onupgradeneeded = (e) => {
+          const upgradeDb = (e.target as IDBOpenDBRequest).result;
+          if (!upgradeDb.objectStoreNames.contains('backgrounds')) {
+            upgradeDb.createObjectStore('backgrounds');
+          }
+        };
+        upgradeReq.onsuccess = () => resolve(upgradeReq.result);
+        upgradeReq.onerror = () => reject(upgradeReq.error);
+      } else {
+        resolve(db);
       }
     };
+    
+    request.onerror = () => reject(request.error);
   });
 };
 

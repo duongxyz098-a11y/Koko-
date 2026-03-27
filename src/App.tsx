@@ -21,6 +21,7 @@ import KokoYouTube from './components/KokoYouTube';
 import LoveShowScreen from './components/LoveShowScreen';
 import NovelScreen from './components/NovelScreen';
 import KikokoNovelScreen from './components/KikokoNovelScreen';
+import RenGram from './components/RenGram';
 import KokoApp from './koko/KokoApp';
 import UserProfileTab from './koko/components/UserProfileTab';
 import BanhNhoChatApp from './components/BanhNhoChatApp';
@@ -90,6 +91,9 @@ export default function App() {
           )}
           {screen === 'kikokonovel' && (
             <KikokoNovelScreen key="kikokonovel" onBack={() => setScreen('home')} />
+          )}
+          {screen === 'rengram' && (
+            <RenGram key="rengram" onBack={() => setScreen('home')} />
           )}
           {screen === 'kokoroleplay' && (
             <KokoApp key="kokoroleplay" onBack={() => setScreen('home')} />
