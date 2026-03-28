@@ -16,6 +16,9 @@ service cloud.firestore {
       match /stories/{storyId} {
         allow read, write: if isOwner(userId);
       }
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
     }
   }
 }

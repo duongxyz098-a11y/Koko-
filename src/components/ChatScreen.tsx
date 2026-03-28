@@ -3,13 +3,14 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Send } from 'lucide-react';
 
 interface ChatScreenProps {
-  prompt: string;
+  prompt: any;
   onBack: () => void;
 }
 
 const ChatScreen: React.FC<ChatScreenProps> = ({ prompt, onBack }) => {
+  const promptTitle = typeof prompt === 'string' ? prompt : prompt?.title || 'Chat';
   const [messages, setMessages] = useState<{role: 'user' | 'ai', text: string}[]>([
-    { role: 'ai', text: `Let's talk about: ${prompt}` }
+    { role: 'ai', text: `Let's talk about: ${promptTitle}` }
   ]);
   const [input, setInput] = useState('');
 
@@ -33,7 +34,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ prompt, onBack }) => {
         <button onClick={onBack} className="p-2 mr-2">
           <ArrowLeft className="w-6 h-6" />
         </button>
-        <h2 className="font-semibold text-lg truncate">{prompt}</h2>
+        <h2 className="font-semibold text-lg truncate">{promptTitle}</h2>
       </div>
       
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
