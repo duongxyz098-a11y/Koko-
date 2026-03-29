@@ -85,6 +85,7 @@ interface KikokoStory {
   useSystemPrompt?: boolean;
   feedbackLog?: string[];
   createdAt: number;
+  autoSummarizeInterval?: number;
 }
 
 const LOADING_MESSAGES = [
@@ -162,6 +163,14 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [summary, setSummary] = useState('');
   const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [showSummaryConfigModal, setShowSummaryConfigModal] = useState(false);
+  const [summaryConfig, setSummaryConfig] = useState({
+    type: 'current',
+    fromChapter: 1,
+    toChapter: 1,
+    autoInterval: 5,
+    extractCharacters: true
+  });
   const [showDirectionModal, setShowDirectionModal] = useState(false);
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
@@ -204,6 +213,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [galleryBackground, setGalleryBackground] = useState<string>(() => {
     return localStorage.getItem('kikoko_gallery_background') || '';
   });
+  const justFinishedGenerationRef = useRef(false);
   
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => {
     const saved = localStorage.getItem('kikoko_api_settings');
@@ -658,6 +668,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         }, targetChapterIndex);
         
         setStreamingContent('');
+        justFinishedGenerationRef.current = !isRegenerate;
         setIsGenerating(false);
         setEstimatedTime(null);
 
@@ -845,19 +856,50 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     generateContent(undefined, feedbackText, true);
   };
 
-  const summarizeChapter = async () => {
-    if (!currentChapter || isSummarizing) return;
+  const executeSummary = async (config: typeof summaryConfig) => {
+    if (!currentStory || isSummarizing) return;
     setIsSummarizing(true);
     setSummary('');
+    setShowSummaryConfigModal(false);
     
     try {
-      const prompt = `Hãy tóm tắt nội dung chương truyện sau đây một cách ngắn gọn, súc tích, tập trung vào các sự kiện chính và diễn biến tâm lý nhân vật để làm ghi nhớ cho chương tiếp theo:
-      Tiêu đề: ${currentChapter.title}
-      Nội dung: ${currentChapter.content}
-      
-      Yêu cầu:
-      1. Tóm tắt dưới 500 ký tự.
-      2. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.`;
+      let prompt = '';
+      if (config.type === 'current') {
+        prompt = `Hãy tóm tắt nội dung chương truyện sau đây một cách ngắn gọn, súc tích, tập trung vào các sự kiện chính và diễn biến tâm lý nhân vật để làm ghi nhớ cho chương tiếp theo:
+        Tiêu đề: ${currentChapter?.title}
+        Nội dung: ${currentChapter?.content}
+        
+        Yêu cầu:
+        1. Tóm tắt dưới 500 ký tự.
+        2. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.`;
+        if (config.extractCharacters) {
+          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong chương và vai trò của họ.`;
+        }
+      } else if (config.type === 'range') {
+        const chaptersToSummarize = currentStory.chapters.slice(config.fromChapter - 1, config.toChapter);
+        const combinedContent = chaptersToSummarize.map(c => `Chương ${c.title}:\n${c.content}`).join('\n\n');
+        prompt = `Hãy tóm tắt nội dung các chương truyện từ chương ${config.fromChapter} đến chương ${config.toChapter} một cách ngắn gọn, súc tích, tập trung vào các sự kiện chính và diễn biến tâm lý nhân vật để làm ghi nhớ:
+        Nội dung: ${combinedContent.substring(0, 50000)}...
+        
+        Yêu cầu:
+        1. Tóm tắt dưới 1000 ký tự.
+        2. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.`;
+        if (config.extractCharacters) {
+          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong các chương này và vai trò của họ.`;
+        }
+      } else if (config.type === 'auto') {
+        const chaptersToSummarize = currentStory.chapters.slice(-config.autoInterval);
+        const combinedContent = chaptersToSummarize.map(c => `Chương ${c.title}:\n${c.content}`).join('\n\n');
+        prompt = `Hãy tóm tắt nội dung ${config.autoInterval} chương truyện gần nhất một cách ngắn gọn, súc tích, tập trung vào các sự kiện chính và diễn biến tâm lý nhân vật để làm ghi nhớ:
+        Nội dung: ${combinedContent.substring(0, 50000)}...
+        
+        Yêu cầu:
+        1. Tóm tắt dưới 1000 ký tự.
+        2. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.`;
+        if (config.extractCharacters) {
+          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong các chương này và vai trò của họ.`;
+        }
+      }
 
       let apiUrl = apiSettings.proxyEndpoint.trim();
       if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
@@ -865,7 +907,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       
       const completionUrl = apiUrl.endsWith('/chat/completions') 
         ? apiUrl 
-        : `${apiUrl}/v1/chat/completions`;
+        : apiUrl.endsWith('/v1') 
+          ? `${apiUrl}/chat/completions`
+          : apiUrl.includes('/v1/')
+            ? `${apiUrl.split('/v1/')[0]}/v1/chat/completions`
+            : `${apiUrl}/v1/chat/completions`;
 
       const response = await fetch(completionUrl, {
         method: 'POST',
@@ -888,14 +934,36 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       const data = await response.json();
       const summaryText = data.choices[0].message.content;
       setSummary(summaryText);
-      setShowSummaryModal(true);
+      
+      if (config.type === 'auto') {
+        const newMemory = currentStory.memory ? `${currentStory.memory}\n\n[Tóm tắt tự động ${config.autoInterval} chương]: ${summaryText}` : `[Tóm tắt tự động ${config.autoInterval} chương]: ${summaryText}`;
+        updateStory({ memory: newMemory });
+        alert('Đã tự động tóm tắt và lưu vào ghi nhớ!');
+      } else {
+        setShowSummaryModal(true);
+      }
     } catch (error) {
       console.error(error);
-      alert('Không thể tóm tắt chương này.');
+      alert('Không thể tóm tắt.');
     } finally {
       setIsSummarizing(false);
     }
   };
+
+  useEffect(() => {
+    if (!isGenerating && justFinishedGenerationRef.current && currentStory && currentStory.autoSummarizeInterval) {
+      justFinishedGenerationRef.current = false;
+      if (currentStory.chapters.length > 0 && currentStory.chapters.length % currentStory.autoSummarizeInterval === 0) {
+        executeSummary({ 
+          type: 'auto', 
+          fromChapter: 1, 
+          toChapter: 1, 
+          autoInterval: currentStory.autoSummarizeInterval, 
+          extractCharacters: summaryConfig.extractCharacters 
+        });
+      }
+    }
+  }, [isGenerating, currentStory, summaryConfig.extractCharacters]);
 
   const generateNpcInteractions = async () => {
     if (!currentStory || isGenerating) return;
@@ -1432,7 +1500,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             Tạo lại
           </button>
           <button 
-            onClick={summarizeChapter}
+            onClick={() => setShowSummaryConfigModal(true)}
             disabled={isSummarizing}
             className="text-xs font-bold text-[#F9C6D4] hover:text-[#F9C6D4]/80 transition-colors"
           >
@@ -1651,6 +1719,123 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           </div>
         </div>
       )}
+      {/* Summary Config Modal */}
+      <AnimatePresence>
+        {showSummaryConfigModal && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-4"
+            >
+              <h2 className="text-xl font-serif font-bold text-[#777777]">Cấu hình Tóm tắt & Ghi nhớ</h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-[#777777] mb-2">Chế độ tóm tắt</label>
+                  <select 
+                    value={summaryConfig.type}
+                    onChange={(e) => setSummaryConfig({...summaryConfig, type: e.target.value})}
+                    className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl text-[#555555] focus:outline-none focus:border-[#F9C6D4]"
+                  >
+                    <option value="current">Tóm tắt chương hiện tại</option>
+                    <option value="range">Tóm tắt theo khoảng chương</option>
+                    <option value="auto">Tự động tóm tắt sau mỗi X chương</option>
+                  </select>
+                </div>
+
+                {summaryConfig.type === 'range' && (
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <label className="block text-sm font-bold text-[#777777] mb-2">Từ chương</label>
+                      <input 
+                        type="number" 
+                        min="1"
+                        max={currentStory?.chapters.length || 1}
+                        value={summaryConfig.fromChapter}
+                        onChange={(e) => setSummaryConfig({...summaryConfig, fromChapter: parseInt(e.target.value) || 1})}
+                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl text-[#555555] focus:outline-none focus:border-[#F9C6D4]"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-sm font-bold text-[#777777] mb-2">Đến chương</label>
+                      <input 
+                        type="number" 
+                        min={summaryConfig.fromChapter}
+                        max={currentStory?.chapters.length || 1}
+                        value={summaryConfig.toChapter}
+                        onChange={(e) => setSummaryConfig({...summaryConfig, toChapter: parseInt(e.target.value) || 1})}
+                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl text-[#555555] focus:outline-none focus:border-[#F9C6D4]"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {summaryConfig.type === 'auto' && (
+                  <div>
+                    <label className="block text-sm font-bold text-[#777777] mb-2">Số chương (X)</label>
+                    <input 
+                      type="number" 
+                      min="1"
+                      value={summaryConfig.autoInterval}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 1;
+                        setSummaryConfig({...summaryConfig, autoInterval: val});
+                        updateStory({ autoSummarizeInterval: val });
+                      }}
+                      className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl text-[#555555] focus:outline-none focus:border-[#F9C6D4]"
+                    />
+                    <p className="text-xs text-stone-400 mt-1">Hệ thống sẽ tự động tóm tắt và lưu vào ghi nhớ mỗi khi bạn tạo xong {summaryConfig.autoInterval} chương mới.</p>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 mt-4">
+                  <input 
+                    type="checkbox" 
+                    id="extractCharacters"
+                    checked={summaryConfig.extractCharacters}
+                    onChange={(e) => setSummaryConfig({...summaryConfig, extractCharacters: e.target.checked})}
+                    className="w-4 h-4 text-[#F9C6D4] rounded border-[#EACFD5] focus:ring-[#F9C6D4]"
+                  />
+                  <label htmlFor="extractCharacters" className="text-sm font-bold text-[#777777]">
+                    Trích xuất và ghi nhớ vai trò nhân vật (bao gồm NPC)
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <button 
+                  onClick={() => {
+                    if (summaryConfig.type === 'auto') {
+                      updateStory({ autoSummarizeInterval: summaryConfig.autoInterval });
+                      setShowSummaryConfigModal(false);
+                      alert('Đã lưu cấu hình tự động tóm tắt!');
+                    } else {
+                      executeSummary(summaryConfig);
+                    }
+                  }}
+                  disabled={isSummarizing}
+                  className="flex-1 py-3 bg-[#F9C6D4] text-white rounded-xl font-bold hover:bg-[#F9C6D4]/90 transition-colors disabled:opacity-50"
+                >
+                  {isSummarizing ? 'Đang xử lý...' : (summaryConfig.type === 'auto' ? 'Lưu cấu hình tự động' : 'Bắt đầu tóm tắt')}
+                </button>
+                <button 
+                  onClick={() => setShowSummaryConfigModal(false)}
+                  className="flex-1 py-3 bg-white border border-[#EACFD5] text-[#777777] rounded-xl font-bold hover:bg-[#FAF9F6] transition-colors"
+                >
+                  Đóng
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Summary Modal */}
       <AnimatePresence>
         {showSummaryModal && (
@@ -1670,7 +1855,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
               <div className="flex flex-col gap-2">
                 <button 
                   onClick={() => {
-                    const newMemory = currentStory.memory ? `${currentStory.memory}\n\n[Chương ${currentChapterIndex + 1}]: ${summary}` : `[Chương ${currentChapterIndex + 1}]: ${summary}`;
+                    let prefix = `[Chương ${currentChapterIndex + 1}]`;
+                    if (summaryConfig.type === 'range') {
+                      prefix = `[Chương ${summaryConfig.fromChapter} - ${summaryConfig.toChapter}]`;
+                    }
+                    const newMemory = currentStory.memory ? `${currentStory.memory}\n\n${prefix}: ${summary}` : `${prefix}: ${summary}`;
                     updateStory({ memory: newMemory });
                     alert('Đã lưu vào Ghi nhớ tóm tắt!');
                     setShowSummaryModal(false);
