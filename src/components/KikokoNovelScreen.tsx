@@ -75,6 +75,7 @@ interface KikokoStory {
   userChar: string;
   prompt: string;
   memory?: string;
+  characterMemory?: string;
   style: string;
   chapters: KikokoChapter[];
   background: string;
@@ -379,6 +380,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       userChar: '',
       prompt: '',
       style: 'Lãng mạn, nhẹ nhàng',
+      memory: '',
+      characterMemory: '',
       chapters: [{
         id: 'ch1',
         title: 'Chương 1',
@@ -704,6 +707,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         Phong cách: ${currentStory.style}
         Prompt bổ sung: ${currentStory.prompt}
         ${currentStory.memory ? `Ghi nhớ tóm tắt các chương trước: ${currentStory.memory}` : ''}
+        ${currentStory.characterMemory ? `Ghi nhớ về các nhân vật (chính, phụ, NPC): ${currentStory.characterMemory}` : ''}
         ${feedback ? `\n[PHẢN HỒI TỪ NGƯỜI DÙNG - HÃY SỬA LỖI VÀ LÀM TỐT HƠN]:\n${feedback}` : ''}
         
         [HƯỚNG ĐI CHƯƠNG MỚI - QUAN TRỌNG NHẤT]: ${finalDirection || 'Phát triển tự nhiên'}
@@ -873,7 +877,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         1. Tóm tắt dưới 500 ký tự.
         2. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.`;
         if (config.extractCharacters) {
-          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong chương và vai trò của họ.`;
+          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong chương và vai trò của họ. Hãy bắt đầu phần này bằng dòng '--- DANH SÁCH NHÂN VẬT ---'`;
         }
       } else if (config.type === 'range') {
         const chaptersToSummarize = currentStory.chapters.slice(config.fromChapter - 1, config.toChapter);
@@ -885,7 +889,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         1. Tóm tắt dưới 1000 ký tự.
         2. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.`;
         if (config.extractCharacters) {
-          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong các chương này và vai trò của họ.`;
+          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong các chương này và vai trò của họ. Hãy bắt đầu phần này bằng dòng '--- DANH SÁCH NHÂN VẬT ---'`;
         }
       } else if (config.type === 'auto') {
         const chaptersToSummarize = currentStory.chapters.slice(-config.autoInterval);
@@ -897,7 +901,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         1. Tóm tắt dưới 1000 ký tự.
         2. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.`;
         if (config.extractCharacters) {
-          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong các chương này và vai trò của họ.`;
+          prompt += `\n3. Trích xuất danh sách các nhân vật (bao gồm cả NPC) xuất hiện trong các chương này và vai trò của họ. Hãy bắt đầu phần này bằng dòng '--- DANH SÁCH NHÂN VẬT ---'`;
         }
       }
 
@@ -935,10 +939,24 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       const summaryText = data.choices[0].message.content;
       setSummary(summaryText);
       
+      const parts = summaryText.split('--- DANH SÁCH NHÂN VẬT ---');
+      const summaryOnly = parts[0].trim();
+      const charactersOnly = parts[1] ? parts[1].trim() : '';
+
       if (config.type === 'auto') {
-        const newMemory = currentStory.memory ? `${currentStory.memory}\n\n[Tóm tắt tự động ${config.autoInterval} chương]: ${summaryText}` : `[Tóm tắt tự động ${config.autoInterval} chương]: ${summaryText}`;
-        updateStory({ memory: newMemory });
-        alert('Đã tự động tóm tắt và lưu vào ghi nhớ!');
+        const prefix = `[Tóm tắt tự động ${config.autoInterval} chương]`;
+        const newMemory = currentStory.memory ? `${currentStory.memory}\n\n${prefix}: ${summaryOnly}` : `${prefix}: ${summaryOnly}`;
+        
+        let newCharMemory = currentStory.characterMemory || '';
+        if (charactersOnly) {
+          newCharMemory = newCharMemory ? `${newCharMemory}\n\n[Cập nhật từ ${prefix}]:\n${charactersOnly}` : `[Cập nhật từ ${prefix}]:\n${charactersOnly}`;
+        }
+        
+        updateStory({ 
+          memory: newMemory,
+          characterMemory: newCharMemory
+        });
+        alert('Đã tự động tóm tắt và lưu vào ghi nhớ dài hạn!');
       } else {
         setShowSummaryModal(true);
       }
@@ -1848,36 +1866,73 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 space-y-4"
+              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             >
-              <h2 className="text-xl font-serif font-bold text-[#777777]">Tóm tắt chương</h2>
-              <p className="text-[#555555] bg-[#FAF9F6] p-4 rounded-xl border border-[#EACFD5]">{summary}</p>
-              <div className="flex flex-col gap-2">
+              <div className="p-6 border-b border-[#EACFD5] flex items-center justify-between bg-[#FAF9F6]">
+                <h2 className="text-xl font-serif font-bold text-[#777777]">Tóm tắt & Nhân vật</h2>
+                <button onClick={() => setShowSummaryModal(false)} className="p-2 hover:bg-white rounded-full transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="space-y-2">
+                  <h3 className="text-sm font-bold text-[#F9C6D4] uppercase tracking-wider">Nội dung tóm tắt</h3>
+                  <p className="text-[#555555] bg-[#FAF9F6] p-4 rounded-xl border border-[#EACFD5] whitespace-pre-wrap leading-relaxed">
+                    {summary.split('--- DANH SÁCH NHÂN VẬT ---')[0].trim()}
+                  </p>
+                </div>
+
+                {summary.includes('--- DANH SÁCH NHÂN VẬT ---') && (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-bold text-[#F9C6D4] uppercase tracking-wider">Danh sách nhân vật & NPC</h3>
+                    <p className="text-[#555555] bg-[#FFF5F7] p-4 rounded-xl border border-[#F9C6D4]/30 whitespace-pre-wrap leading-relaxed italic">
+                      {summary.split('--- DANH SÁCH NHÂN VẬT ---')[1].trim()}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 border-t border-[#EACFD5] bg-[#FAF9F6] flex flex-col gap-2">
                 <button 
                   onClick={() => {
+                    const parts = summary.split('--- DANH SÁCH NHÂN VẬT ---');
+                    const summaryOnly = parts[0].trim();
+                    const charactersOnly = parts[1] ? parts[1].trim() : '';
+
                     let prefix = `[Chương ${currentChapterIndex + 1}]`;
                     if (summaryConfig.type === 'range') {
                       prefix = `[Chương ${summaryConfig.fromChapter} - ${summaryConfig.toChapter}]`;
                     }
-                    const newMemory = currentStory.memory ? `${currentStory.memory}\n\n${prefix}: ${summary}` : `${prefix}: ${summary}`;
-                    updateStory({ memory: newMemory });
-                    alert('Đã lưu vào Ghi nhớ tóm tắt!');
+                    
+                    const newMemory = currentStory.memory ? `${currentStory.memory}\n\n${prefix}: ${summaryOnly}` : `${prefix}: ${summaryOnly}`;
+                    
+                    let newCharMemory = currentStory.characterMemory || '';
+                    if (charactersOnly) {
+                      newCharMemory = newCharMemory ? `${newCharMemory}\n\n[Cập nhật từ ${prefix}]:\n${charactersOnly}` : `[Cập nhật từ ${prefix}]:\n${charactersOnly}`;
+                    }
+
+                    updateStory({ 
+                      memory: newMemory,
+                      characterMemory: newCharMemory
+                    });
+                    alert('Đã lưu vào Ghi nhớ dài hạn (Cốt truyện & Nhân vật)!');
                     setShowSummaryModal(false);
                   }}
-                  className="w-full py-3 bg-[#F9C6D4] text-white rounded-xl font-bold hover:bg-[#F9C6D4]/90 transition-colors"
+                  className="w-full py-3 bg-[#F9C6D4] text-white rounded-xl font-bold hover:bg-[#F9C6D4]/90 shadow-md transition-all active:scale-95"
                 >
-                  Lưu vào Ghi nhớ truyện
+                  Lưu vào Ghi nhớ dài hạn
                 </button>
                 <div className="flex gap-2">
                   <button 
                     onClick={() => { navigator.clipboard.writeText(summary); alert('Đã sao chép!'); }}
                     className="flex-1 py-3 bg-white border border-[#F9C6D4] text-[#F9C6D4] rounded-xl font-bold hover:bg-[#FAF9F6] transition-colors"
                   >
-                    Sao chép
+                    Sao chép tất cả
                   </button>
                   <button 
                     onClick={() => setShowSummaryModal(false)}
-                    className="flex-1 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-300 transition-colors"
+                    className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-colors"
                   >
                     Đóng
                   </button>
@@ -1995,6 +2050,19 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         onChange={(e) => updateStory({ memory: e.target.value })}
                         className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors h-24 resize-none"
                         placeholder="Dán tóm tắt các chương trước vào đây để AI nhớ mạch truyện..."
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-bold text-[#F9C6D4] uppercase tracking-wider flex items-center gap-2">
+                        Bộ nhớ Nhân vật & NPC (Dài hạn)
+                        <span className="text-xs font-normal text-gray-400 normal-case">Lưu trữ thông tin chi tiết về các nhân vật</span>
+                      </label>
+                      <textarea 
+                        value={currentStory.characterMemory || ''}
+                        onChange={(e) => updateStory({ characterMemory: e.target.value })}
+                        className="w-full p-3 bg-[#FFF5F7] border border-[#F9C6D4]/30 rounded-xl outline-none focus:border-[#F9C6D4] transition-colors h-24 resize-none"
+                        placeholder="Lưu trữ thông tin chi tiết về các nhân vật..."
                       />
                     </div>
 

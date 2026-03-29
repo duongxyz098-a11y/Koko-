@@ -66,6 +66,7 @@ interface Novel {
     extremeCapacityMode?: boolean;
     maxTokens?: number;
     timeout?: number;
+    fontSize?: number;
     responseHistory?: number[];
   };
   userPlot?: string;
@@ -74,6 +75,8 @@ interface Novel {
   userCharInfo?: string;
   writingPrompt?: string;
   npcCount?: number;
+  longTermMemory?: string;
+  characterMemory?: string;
 }
 
 interface NovelScreenProps {
@@ -86,6 +89,7 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const [currentNovelId, setCurrentNovelId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   
   const handleLogin = async () => {
     try {
@@ -115,8 +119,25 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [fontSize, setFontSize] = useState(24);
+  
+  // Current Novel State (Derived)
+  const currentNovel = novels.find(n => n.id === currentNovelId);
+
+  const [fontSize, setFontSize] = useState(currentNovel?.settings?.fontSize || 24);
+  const [generatedTokens, setGeneratedTokens] = useState(0);
+  const [requestedTokens, setRequestedTokens] = useState(32000);
   const [previewChapter, setPreviewChapter] = useState<Chapter | null>(null);
+  
+  useEffect(() => {
+    if (currentNovel?.settings?.fontSize && currentNovel.settings.fontSize !== fontSize) {
+      setFontSize(currentNovel.settings.fontSize);
+    }
+  }, [currentNovelId]);
+
+  const updateFontSize = (newSize: number) => {
+    setFontSize(newSize);
+    updateSettings({ fontSize: newSize });
+  };
   const [userPlot, setUserPlot] = useState('');
   const [nextChapterLength, setNextChapterLength] = useState<number | ''>('');
   const [showDirectionModal, setShowDirectionModal] = useState(false);
@@ -138,8 +159,7 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const novelAbortControllerRef = useRef<AbortController | null>(null);
   const gossipAbortControllerRef = useRef<AbortController | null>(null);
 
-  // Current Novel State (Derived)
-  const currentNovel = novels.find(n => n.id === currentNovelId);
+  // Current Novel State (Derived) moved up to fix TDZ
 
   // Persistence with Firebase
   useEffect(() => {
@@ -148,6 +168,7 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
     const authUnsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      setIsAuthLoading(false);
       if (!currentUser) {
         console.log('NovelScreen: No user.');
         setNovels([]);
@@ -352,7 +373,9 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
       botCharInfo: '',
       userCharInfo: '',
       writingPrompt: '',
-      npcCount: 500
+      npcCount: 500,
+      longTermMemory: '',
+      characterMemory: '',
     };
     console.log('Saving novel to Firebase:', newNovel);
     await saveNovelToFirebase(newNovel);
@@ -462,6 +485,8 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
     setIsGenerating(true);
     setError(null);
     setStreamingContent('');
+    setGeneratedTokens(0);
+    setRequestedTokens(currentNovel.settings.maxTokens || 32000);
     
     // HỆ THỐNG THỜI GIAN THÔNG MINH (Adaptive Timeout)
     // Tính toán thời gian dựa trên lịch sử và độ phức tạp
@@ -502,7 +527,10 @@ QUY TẮC BẮT BUỘC:
 7. THÔNG TIN NHÂN VẬT:
    - Bot Character: ${currentNovel.botCharInfo || 'Chưa xác định'}
    - User Character: ${currentNovel.userCharInfo || 'Chưa xác định'}
-8. PHONG CÁCH VIẾT: ${currentNovel.writingPrompt || 'Tự nhiên, lôi cuốn'}`;
+8. BỘ NHỚ DÀI HẠN (Cốt truyện & Bối cảnh): ${currentNovel.longTermMemory || 'Chưa có dữ liệu'}
+9. BỘ NHỚ NHÂN VẬT (Thông tin các nhân vật phụ/chính/NPC): ${currentNovel.characterMemory || 'Chưa có dữ liệu'}
+10. PHONG CÁCH VIẾT: ${currentNovel.writingPrompt || 'Tự nhiên, lôi cuốn'}
+11. QUY TẮC TRÌNH BÀY: Mỗi dòng văn bản (line) PHẢI có độ dài từ 10 đến 14 chữ/từ trước khi xuống dòng. Hãy ngắt dòng một cách thủ công (manual line breaks) để đảm bảo mỗi dòng đều có độ dài này. Đây là yêu cầu BẮT BUỘC về định dạng.`;
 
       const userPrompt = `Hãy viết chương tiếp theo cho tiểu thuyết "${currentNovel.storyName}".
 THÔNG TIN TRUYỆN:
@@ -550,8 +578,8 @@ YÊU CẦU NỘI DUNG:
           ],
           temperature: 0.7,
           stream: useStreaming,
-          // NÂNG CẤP SỨC CHỨA: Cho phép nhận tối đa 100.000 tokens nếu bật Extreme Mode
-          max_tokens: extremeCapacityMode ? 100000 : 32000 
+          // NÂNG CẤP SỨC CHỨA: Cho phép nhận tối đa 1.000.000 tokens nếu bật Extreme Mode
+          max_tokens: extremeCapacityMode ? 1000000 : (currentNovel.settings.maxTokens || 32000)
         })
       });
 
@@ -598,6 +626,8 @@ YÊU CẦU NỘI DUNG:
                   generatedContent += delta;
                   setStreamingContent(generatedContent);
                   setContent(generatedContent);
+                  // Ước tính token: 1 token ~ 4 ký tự
+                  setGeneratedTokens(Math.floor(generatedContent.length / 4));
                 }
               } catch (e) {
                 // Bỏ qua lỗi parse JSON vì có thể chunk bị cắt ngang
@@ -638,6 +668,10 @@ YÊU CẦU NỘI DUNG:
         if (data.error) {
           throw new Error(data.error.message || 'API Error');
         }
+        
+        const finalContent = data.choices?.[0]?.message?.content || '';
+        setContent(finalContent);
+        setGeneratedTokens(Math.floor(finalContent.length / 4));
         
         // Handle different API response formats (Chat vs Completions vs Gemini vs Anthropic)
         let generatedContent = '';
@@ -868,6 +902,39 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
   };
 
   // Main Render
+  if (isAuthLoading) {
+    return (
+      <div className="h-screen w-full bg-[#FAF7F2] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-[#DB2777]/20 border-t-[#DB2777] rounded-full animate-spin" />
+          <p className="text-stone-400 font-medium animate-pulse">Đang kiểm tra thông tin...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="h-screen w-full bg-black flex items-center justify-center p-6">
+        <div className="bg-white/10 backdrop-blur-xl p-8 rounded-3xl border border-white/20 text-center space-y-6 max-w-sm w-full">
+          <div className="w-20 h-20 bg-[#F9C6D4] rounded-2xl mx-auto flex items-center justify-center shadow-lg">
+            <BookOpen size={40} className="text-white" />
+          </div>
+          <h1 className="text-2xl font-serif font-bold text-white">Novel AI</h1>
+          <p className="text-white/60 text-sm">Đăng nhập để lưu trữ tiểu thuyết của bạn vĩnh viễn trên đám mây.</p>
+          <button 
+            onClick={handleLogin}
+            className="w-full py-4 bg-white text-black rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-gray-100 transition-all active:scale-95"
+          >
+            <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+            Tiếp tục với Google
+          </button>
+          <button onClick={onBack} className="text-white/40 text-sm hover:text-white transition-colors">Quay lại</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full w-full overflow-hidden">
       <input 
@@ -1173,21 +1240,36 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                       <div className="space-y-4 p-4 bg-stone-50 rounded-xl border border-stone-200">
                         <label className="block text-xs font-bold text-stone-500 uppercase">Cài đặt Token & Timeout</label>
                         <div className="flex flex-wrap gap-2">
-                          {[30000, 50000, 100000].map(tokens => (
+                          {[30000, 50000, 100000, 500000].map(tokens => (
                             <button 
                               key={tokens}
                               onClick={() => updateSettings({ maxTokens: tokens })}
                               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${currentNovel.settings.maxTokens === tokens ? 'bg-[#DB2777] text-white' : 'bg-white text-stone-600 border border-stone-200'}`}
                             >
-                              {tokens.toLocaleString()} Tokens
+                              {tokens >= 1000000 ? `${tokens/1000000}M` : tokens >= 1000 ? `${tokens/1000}K` : tokens} Tokens
                             </button>
                           ))}
                           <button 
-                            onClick={() => updateSettings({ maxTokens: 200000 })}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${currentNovel.settings.maxTokens === 200000 ? 'bg-[#DB2777] text-white' : 'bg-white text-stone-600 border border-stone-200'}`}
+                            onClick={() => updateSettings({ maxTokens: 1000000 })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${currentNovel.settings.maxTokens === 1000000 ? 'bg-[#DB2777] text-white' : 'bg-white text-stone-600 border border-stone-200'}`}
+                          >
+                            1M (Siêu Khổng Lồ)
+                          </button>
+                          <button 
+                            onClick={() => updateSettings({ maxTokens: 2000000 })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${currentNovel.settings.maxTokens === 2000000 ? 'bg-[#DB2777] text-white' : 'bg-white text-stone-600 border border-stone-200'}`}
                           >
                             Vô hạn
                           </button>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <label className="text-xs font-bold text-stone-500 uppercase">Tùy chỉnh Token:</label>
+                          <input 
+                            type="number" 
+                            value={currentNovel.settings.maxTokens || 32000} 
+                            onChange={(e) => updateSettings({ maxTokens: Number(e.target.value) })}
+                            className="w-32 p-2 bg-white rounded-lg border border-stone-200 text-sm outline-none"
+                          />
                         </div>
                         <div className="flex items-center gap-3">
                           <label className="text-xs font-bold text-stone-500 uppercase">Timeout (phút):</label>
@@ -1284,6 +1366,17 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-stone-500 uppercase mb-1 ml-1">Độ dài chương mặc định (từ)</label>
+                          <div className="flex gap-2 mb-2">
+                            {[1000, 5000, 10000, 50000].map(len => (
+                              <button 
+                                key={len}
+                                onClick={() => updateCurrentNovel({ chapterLength: len })}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${currentNovel.chapterLength === len ? 'bg-[#DB2777] text-white' : 'bg-stone-100 text-stone-600'}`}
+                              >
+                                {len >= 1000 ? `${len/1000}K` : len} chữ
+                              </button>
+                            ))}
+                          </div>
                           <input type="number" value={currentNovel.chapterLength} onChange={(e) => updateCurrentNovel({ chapterLength: Number(e.target.value) })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none" />
                         </div>
                         <div>
@@ -1328,6 +1421,14 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                         <div>
                           <label className="block text-xs font-bold text-stone-500 uppercase mb-1 ml-1">Phong cách viết / Prompt bổ sung</label>
                           <textarea placeholder="Ví dụ: Viết theo phong cách u tối, lãng mạn, sử dụng nhiều ẩn dụ..." value={currentNovel.writingPrompt} onChange={(e) => updateCurrentNovel({ writingPrompt: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none h-24 resize-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-stone-500 uppercase mb-1 ml-1">Bộ nhớ dài hạn (Cốt truyện & Bối cảnh)</label>
+                          <textarea placeholder="Tóm tắt cốt truyện quan trọng cần nhớ vĩnh viễn..." value={currentNovel.longTermMemory} onChange={(e) => updateCurrentNovel({ longTermMemory: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none h-24 resize-none" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-stone-500 uppercase mb-1 ml-1">Bộ nhớ nhân vật (Chính, Phụ, NPC)</label>
+                          <textarea placeholder="Danh sách và đặc điểm các nhân vật đã xuất hiện..." value={currentNovel.characterMemory} onChange={(e) => updateCurrentNovel({ characterMemory: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none h-24 resize-none" />
                         </div>
                       </div>
                     </div>
@@ -1381,12 +1482,13 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                       </div>
                       <div className="flex items-center gap-2 md:gap-4">
                         <div className="hidden sm:flex items-center bg-stone-100 rounded-full px-3 py-1 gap-3">
-                          <button onClick={() => setFontSize(Math.max(12, fontSize - 2))} className="text-stone-500 hover:text-[#DB2777] font-bold text-lg p-1">A-</button>
+                          <button onClick={() => updateFontSize(Math.max(12, fontSize - 2))} className="text-stone-500 hover:text-[#DB2777] font-bold text-lg p-1">A-</button>
                           <span className="text-xs font-bold text-stone-400 w-8 text-center">{fontSize}</span>
-                          <button onClick={() => setFontSize(Math.min(48, fontSize + 2))} className="text-stone-500 hover:text-[#DB2777] font-bold text-lg p-1">A+</button>
+                          <button onClick={() => updateFontSize(Math.min(48, fontSize + 2))} className="text-stone-500 hover:text-[#DB2777] font-bold text-lg p-1">A+</button>
                         </div>
+                        <button onClick={() => setShowDrawer(true)} className="p-2 text-stone-400 hover:text-[#DB2777] rounded-full transition-all" title="Mở ngăn kéo (Mục lục)"><Menu size={20} /></button>
                         <button onClick={() => setIsFocusMode(!isFocusMode)} className={`p-2 rounded-full transition-all ${isFocusMode ? 'bg-[#DB2777] text-white' : 'text-stone-400 hover:text-[#DB2777]'}`}><Sparkles size={20} /></button>
-                        <button onClick={handleSave} className="px-4 md:px-6 py-2 bg-[#DB2777] text-white rounded-full hover:bg-[#BE185D] transition-all shadow-md font-bold text-xs md:text-sm flex items-center gap-2"><Save className="w-4 h-4 md:w-[18px] md:h-[18px]" /> Lưu</button>
+                        <button onClick={handleSave} className="px-4 md:px-6 py-2 bg-[#DB2777] text-white rounded-full hover:bg-[#BE185D] transition-all shadow-md font-bold text-xs md:text-sm flex items-center gap-2" title="Lưu chương này vào ngăn kéo"><Save className="w-4 h-4 md:w-[18px] md:h-[18px]" /> Lưu vào ngăn kéo</button>
                       </div>
                     </div>
 
@@ -1403,6 +1505,14 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                             </div>
                             <div>
                               <p className="text-[#DB2777] font-bold text-sm">AI đang sáng tác...</p>
+                              <div className="mt-2 flex flex-col items-center">
+                                <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Tiến trình Token</p>
+                                <div className="flex items-center gap-2 text-lg font-mono font-bold text-[#DB2777]">
+                                  <span>{generatedTokens.toLocaleString()}</span>
+                                  <span className="text-stone-300">/</span>
+                                  <span className="text-stone-400">{requestedTokens.toLocaleString()}</span>
+                                </div>
+                              </div>
                               <p className="text-[10px] text-stone-400 mt-1">
                                 {estimatedTime ? `Dự kiến hoàn thành trong ${estimatedTime} phút` : 'Đang khởi tạo kết nối...'}
                               </p>
