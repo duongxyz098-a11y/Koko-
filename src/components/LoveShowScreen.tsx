@@ -5,6 +5,7 @@ import { generateNPCs, generateLoveQuiz, generateCafeScenarios, generateNPCRespo
 import { sendCoreMessage } from '../services/coreAi';
 import { saveToDB, getFromDB } from '../utils/indexedDB';
 import { compressImage } from '../utils/imageUtils';
+import { fetchAvailableModels, ApiProxySettings } from '../utils/apiProxy';
 
 export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   const [activeTab, setActiveTab] = useState<'apply' | 'show'>('apply');
@@ -52,16 +53,46 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
       return parsed || {
         maxTokens: 30000,
         timeoutMinutes: 5,
-        superMode: false
+        superMode: false,
+        isUnlimited: false,
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        apiKey: '',
+        model: 'gemini-3-flash-preview'
       };
     } catch (e) {
       return {
         maxTokens: 30000,
         timeoutMinutes: 5,
-        superMode: false
+        superMode: false,
+        isUnlimited: false,
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        apiKey: '',
+        model: 'gemini-3-flash-preview'
       };
     }
   });
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+
+  const handleFetchModels = async () => {
+    if (!settings.apiKey) {
+      alert("Vui lòng nhập API Key trước khi kéo Model.");
+      return;
+    }
+    setFetchingModels(true);
+    try {
+      const models = await fetchAvailableModels(settings.endpoint, settings.apiKey);
+      setAvailableModels(models);
+      if (models.length > 0 && !models.includes(settings.model)) {
+        setSettings(s => ({ ...s, model: models[0] }));
+      }
+      alert(`Đã kéo thành công ${models.length} model!`);
+    } catch (e) {
+      alert("Lỗi khi kéo model: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setFetchingModels(false);
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('loveshow_settings', JSON.stringify(settings));
@@ -106,7 +137,7 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
     
     try {
       // Gọi API ngay lập tức để lấy lời chào dài
-      const response = await generateNPCResponse(npc, "Chào bạn! Hãy giới thiệu bản thân một cách chi tiết và ấn tượng nhé.", [], formData, undefined, undefined, undefined, (text) => {
+      const response = await generateNPCResponse(npc, "Chào bạn! Hãy giới thiệu bản thân một cách chi tiết và ấn tượng nhé.", [], formData, settings, settings.maxTokens, settings.timeoutMinutes, settings.superMode, (text) => {
         setChatHistory([{ role: 'npc', content: text, isStreaming: true }]);
       });
       setChatHistory([{ role: 'npc', content: response.content, usage: response.usage, isStreaming: false }]);
@@ -124,7 +155,7 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
     const count = formData.npcCount || 40;
     setProgress({ current: 0, total: count });
     try {
-      await generateNPCs(count, formData, (current, total, newItems) => {
+      await generateNPCs(count, formData, settings, (current, total, newItems) => {
         setProgress({ current, total });
         if (newItems) {
           setNpcs(prev => [...prev, ...newItems]);
@@ -156,7 +187,7 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
     
     try {
       const history = (chatHistory || []).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
-      const response = await generateNPCResponse(selectedNpc, userMsg, history, formData, settings.maxTokens, settings.timeoutMinutes, settings.superMode, (text) => {
+      const response = await generateNPCResponse(selectedNpc, userMsg, history, formData, settings, settings.maxTokens, settings.timeoutMinutes, settings.superMode, (text) => {
         setChatHistory(prev => {
           const newHistory = [...prev];
           const lastMsg = newHistory[newHistory.length - 1];
@@ -233,13 +264,62 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
 
       {showSettings && (
         <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center p-4">
-          {null}
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-            <h2 className="text-xl font-bold mb-4">Cài đặt</h2>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">Cài đặt API Proxy</h2>
             <div className="space-y-4">
               <div>
+                <label className="block text-sm font-bold mb-1">API Endpoint</label>
+                <input 
+                  type="text" 
+                  value={settings.endpoint} 
+                  onChange={e => setSettings(s => ({...s, endpoint: e.target.value}))} 
+                  className="w-full p-2 border rounded-lg text-xs"
+                  placeholder="https://..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold mb-1">API Key</label>
+                <input 
+                  type="password" 
+                  value={settings.apiKey} 
+                  onChange={e => setSettings(s => ({...s, apiKey: e.target.value}))} 
+                  className="w-full p-2 border rounded-lg text-xs"
+                  placeholder="sk-..."
+                />
+              </div>
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-bold">Model</label>
+                  <button 
+                    onClick={handleFetchModels}
+                    disabled={fetchingModels}
+                    className="text-[10px] text-blue-600 font-bold hover:underline disabled:opacity-50"
+                  >
+                    {fetchingModels ? "Đang kéo..." : "Kéo Model"}
+                  </button>
+                </div>
+                {availableModels.length > 0 ? (
+                  <select 
+                    value={settings.model} 
+                    onChange={e => setSettings(s => ({...s, model: e.target.value}))} 
+                    className="w-full p-2 border rounded-lg text-xs"
+                  >
+                    {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                ) : (
+                  <input 
+                    type="text" 
+                    value={settings.model} 
+                    onChange={e => setSettings(s => ({...s, model: e.target.value}))} 
+                    className="w-full p-2 border rounded-lg text-xs"
+                    placeholder="gemini-3-flash-preview"
+                  />
+                )}
+              </div>
+              <hr className="border-gray-100" />
+              <div>
                 <label className="block text-sm font-bold mb-1">Max Tokens</label>
-                <select value={settings.maxTokens} onChange={e => setSettings(s => ({...s, maxTokens: parseInt(e.target.value)}))} className="w-full p-2 border rounded-lg">
+                <select value={settings.maxTokens} onChange={e => setSettings(s => ({...s, maxTokens: parseInt(e.target.value)}))} className="w-full p-2 border rounded-lg text-xs">
                   <option value={30000}>30,000</option>
                   <option value={50000}>50,000</option>
                   <option value={100000}>100,000</option>
@@ -248,7 +328,7 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
               <div>
                 <label className="block text-sm font-bold mb-1">Thời gian chờ (Phút)</label>
                 <div className="flex gap-2">
-                  <input type="number" value={settings.timeoutMinutes} onChange={e => setSettings(s => ({...s, timeoutMinutes: parseInt(e.target.value)}))} className="flex-1 p-2 border rounded-lg" />
+                  <input type="number" value={settings.timeoutMinutes} onChange={e => setSettings(s => ({...s, timeoutMinutes: parseInt(e.target.value)}))} className="flex-1 p-2 border rounded-lg text-xs" />
                   <button 
                     onClick={() => {
                       const suggested = Math.max(5, Math.ceil((formData.maxChars || 2000) / 500) + (npcs.length > 0 ? 2 : 0));
@@ -266,10 +346,22 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
                   <span className="text-sm font-bold">Super Mode (100k Tokens)</span>
                 </label>
               </div>
+              <div>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={settings.isUnlimited} onChange={e => setSettings(s => ({...s, isUnlimited: e.target.checked}))} />
+                  <span className="text-sm font-bold">Không giới hạn Token (Unlimited)</span>
+                </label>
+              </div>
               <button onClick={() => setShowSettings(false)} className="w-full bg-pink-500 text-white p-2 rounded-lg font-bold">Lưu</button>
               <button onClick={async () => {
                 try {
-                  await sendCoreMessage("Ping", [], { title: 'Test', context: 'Test', rules: 'Reply "Pong"', length: 'Short', ooc: 'No' });
+                  await generateNPCResponse(
+                    { id: 'test', name: 'Test Bot', age: 20, avatarSeed: 'test', mbti: 'INTJ', intro: 'Test' },
+                    "Ping",
+                    [],
+                    formData,
+                    settings
+                  );
                   alert('Kết nối thành công! API Key và Proxy URL đang hoạt động tốt.');
                 } catch (e: any) {
                   alert('Kết nối thất bại: ' + e.message);
@@ -300,9 +392,9 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
       <div className="flex-1 overflow-y-auto p-4 pb-24">
         <AnimatePresence mode="wait">
           {activeMiniGame === 'quiz' ? (
-            <LoveQuiz key="quiz" onBack={() => setActiveMiniGame('none')} quizCount={formData.quizCount || 10} />
+            <LoveQuiz key="quiz" onBack={() => setActiveMiniGame('none')} quizCount={formData.quizCount || 10} settings={settings} />
           ) : activeMiniGame === 'cafe' ? (
-            <LoveCafe key="cafe" onBack={() => setActiveMiniGame('none')} cafeCount={formData.cafeCount || 10} />
+            <LoveCafe key="cafe" onBack={() => setActiveMiniGame('none')} cafeCount={formData.cafeCount || 10} settings={settings} />
           ) : selectedNpc ? (
             <ChatView 
               key="chat" 
@@ -708,7 +800,7 @@ function ChatView({ npc, onBack, chatHistory, chatInput, setChatInput, handleSen
   );
 }
 
-function LoveQuiz({ onBack, quizCount }: { onBack: () => void, quizCount: number }) {
+function LoveQuiz({ onBack, quizCount, settings }: { onBack: () => void, quizCount: number, settings: ApiProxySettings }) {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState({ current: 0, total: quizCount });
@@ -719,7 +811,7 @@ function LoveQuiz({ onBack, quizCount }: { onBack: () => void, quizCount: number
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
 
   useEffect(() => {
-    generateLoveQuiz(quizCount, (current, total, newItems) => {
+    generateLoveQuiz(quizCount, settings, (current, total, newItems) => {
       setProgress({ current, total });
       if (newItems) {
         setQuestions(prev => [...prev, ...newItems]);
@@ -829,7 +921,7 @@ function LoveQuiz({ onBack, quizCount }: { onBack: () => void, quizCount: number
   );
 }
 
-function LoveCafe({ onBack, cafeCount }: { onBack: () => void, cafeCount: number }) {
+function LoveCafe({ onBack, cafeCount, settings }: { onBack: () => void, cafeCount: number, settings: ApiProxySettings }) {
   const [scenarios, setScenarios] = useState<CafeScenario[]>([]);
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState({ current: 0, total: cafeCount });
@@ -855,7 +947,7 @@ function LoveCafe({ onBack, cafeCount }: { onBack: () => void, cafeCount: number
   useEffect(() => {
     setLoading(true);
     setError(null);
-    generateCafeScenarios(cafeCount, (current, total, newItems) => {
+    generateCafeScenarios(cafeCount, settings, (current, total, newItems) => {
       setProgress({ current, total });
       if (newItems) {
         setScenarios(prev => [...prev, ...newItems]);

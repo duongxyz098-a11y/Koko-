@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, Plus, Image as ImageIcon } from 'lucide-react';
 import { sendCoreMessageStream } from '../../services/coreAi';
 import { compressImage } from '../../utils/imageUtils';
+import { ApiProxySettings } from '../../utils/apiProxy';
 
 export default function NotebooksView({ char, onBack }: { char: any, onBack: () => void }) {
   const [openedNotebook, setOpenedNotebook] = useState<number | null>(null);
@@ -64,15 +65,25 @@ export default function NotebooksView({ char, onBack }: { char: any, onBack: () 
       const prompt = `Viết nội dung cho cuốn sổ "${notebooks[openedNotebook! - 1].title}" của nhân vật ${char.name}. Độ dài yêu cầu: khoảng ${targetLength} ký tự. Thông tin nhân vật: ${char.history} ${char.personality}`;
       
       const settingsStr = localStorage.getItem('koko_api_settings');
-      let apiSettings = { maxTokens: 100000, timeoutMinutes: 20 };
+      let apiSettings: ApiProxySettings = { 
+        endpoint: '', 
+        apiKey: '', 
+        model: 'gemini-3-flash-preview', 
+        maxTokens: 100000, 
+        timeoutMinutes: 20 
+      };
       if (settingsStr) {
-        try { apiSettings = JSON.parse(settingsStr); } catch(e){}
+        try { 
+          const parsed = JSON.parse(settingsStr);
+          apiSettings = { ...apiSettings, ...parsed };
+        } catch(e){}
       }
 
       const response = await sendCoreMessageStream(
         prompt, [], 
         { title: 'Koko Notebook', context: 'Viết nhật ký', rules: 'CHỈ VIẾT VĂN BẢN THUẦN TÚY. KHÔNG DÙNG JSON HAY CODE.', length: `${targetLength} ký tự`, ooc: 'Không' },
-        { mode: 'novel', minChars: targetLength - 500, maxChars: targetLength + 500, maxTokens: apiSettings.maxTokens, timeoutMinutes: apiSettings.timeoutMinutes }
+        { mode: 'novel', minChars: targetLength - 500, maxChars: targetLength + 500, maxTokens: apiSettings.maxTokens, timeoutMinutes: apiSettings.timeoutMinutes },
+        apiSettings
       );
 
       const reader = response.body?.getReader();

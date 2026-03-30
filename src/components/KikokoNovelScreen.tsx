@@ -1299,6 +1299,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
             {/* Text Content */}
             <div className="flex-1 min-h-[300px] relative">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs text-stone-400">
+                  Số ký tự: {((currentChapter?.content || '') + streamingContent).length.toLocaleString()}
+                </span>
+              </div>
               {isEditing ? (
                 <textarea 
                   value={(currentChapter?.content || '') + streamingContent}

@@ -2,9 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Heart, MessageCircle, User, Dices, Sparkles, ChevronLeft, ChevronRight, Briefcase, Upload, Image as ImageIcon, Send, Settings, RefreshCw, Trash2, Plus, Users, Loader2, Download, Check, Save } from 'lucide-react';
 import { sendCoreMessage, sendCoreMessageStream, KokoPrompt, ChatMessage } from '../services/coreAi';
-import { generateNPCs, generateNPCResponse, extractJSON } from '../services/geminiService';
+import { generateNPCs, generateNPCResponse, extractJSON, NPCProfile, UserProfile } from '../services/geminiService';
 import { saveToDB, getFromDB } from '../utils/indexedDB';
 import { compressImage } from '../utils/imageUtils';
+import { fetchAvailableModels } from '../utils/apiProxy';
 
 const personalities = [
   { group: "Tư Duy & Phân Tích", items: ["Tư duy logic", "Phân tích sâu", "Lý trí", "Chiến lược", "Sáng tạo", "Độc đáo", "Trực giác", "Tò mò", "Nghiên cứu", "Khoa học", "Tư duy phản biện", "Tập trung cao", "Khách quan", "Tổng quan", "Chi tiết", "Thực tế", "Thực dụng", "Hiện đại", "Đổi mới", "Trải nghiệm"] },
@@ -65,113 +66,106 @@ interface Profile {
 
 export default function DatingScreen({ onBack }: { onBack: () => void }) {
   const [showSplash, setShowSplash] = useState(true);
-  const [profiles, setProfiles] = useState<Profile[]>(() => {
-    try {
-      const saved = localStorage.getItem('dating_profiles');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed.map((p: any) => ({
-          ...p,
-          npcPreferences: p.npcPreferences || { age: [], personality: [], gender: [], hobbies: [], career: [] },
-          contacts: p.contacts || [],
-          userPosts: p.userPosts || [],
-          avatarBg: p.avatarBg || '#F3B4C2',
-          npcCustomAvatars: p.npcCustomAvatars || {},
-          npcCustomBgs: p.npcCustomBgs || {}
-        }));
-      }
-      
-      // Migration logic for existing single profile
-      const oldPrefs = JSON.parse(localStorage.getItem('dating_user_prefs') || '{"age":[],"personality":[],"gender":[],"hobbies":[],"career":[]}');
-      const oldFollowed = JSON.parse(localStorage.getItem('dating_followed_npcs') || '[]');
-      const oldAvatar = localStorage.getItem('dating_avatar') || npcImageLinks[0];
-      const oldBg = localStorage.getItem('dating_bg') || '';
-      const oldProfileBg = localStorage.getItem('dating_profile_bg') || '';
-      const oldChatBg = localStorage.getItem('dating_chat_bg') || '';
-      
-      const initialProfile: Profile = {
-        id: 'default',
-        name: 'Người dùng mới',
-        avatar: oldAvatar,
-        preferences: oldPrefs,
-        npcPreferences: { age: [], personality: [], gender: [], hobbies: [], career: [] },
-        followedNpcs: oldFollowed,
-        chatMessages: {},
-        contacts: [],
-        userPosts: [],
-        appBackground: oldBg,
-        profileBackground: oldProfileBg,
-        chatBackground: oldChatBg,
-        avatarBg: '#F3B4C2',
-        npcCustomAvatars: {},
-        npcCustomBgs: {},
-        chatMode: 'online',
-        novelMinChars: 500,
-        novelMaxChars: 2000
-      };
-      return [initialProfile];
-    } catch {
-      return [{
-        id: 'default',
-        name: 'Người dùng mới',
-        avatar: npcImageLinks[0],
-        preferences: { age: [], personality: [], gender: [], hobbies: [], career: [] },
-        npcPreferences: { age: [], personality: [], gender: [], hobbies: [], career: [] },
-        followedNpcs: [],
-        chatMessages: {},
-        contacts: [],
-        userPosts: [],
-        appBackground: '',
-        profileBackground: '',
-        chatBackground: '',
-        avatarBg: '#F3B4C2',
-        npcCustomAvatars: {},
-        npcCustomBgs: {},
-        chatMode: 'online',
-        novelMinChars: 500,
-        novelMaxChars: 2000
-      }];
-    }
-  });
-
-  const [currentProfileId, setCurrentProfileId] = useState(() => localStorage.getItem('dating_current_profile_id') || 'default');
-  const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [currentProfileId, setCurrentProfileId] = useState<string>('default');
+  const [userApiKey, setUserApiKey] = useState('');
+  const [userApiUrl, setUserApiUrl] = useState('');
+  const [userModelName, setUserModelName] = useState('');
+  const [userIsUnlimited, setUserIsUnlimited] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [showApiSettings, setShowApiSettings] = useState(false);
-  const [userApiKey, setUserApiKey] = useState(() => {
-    const saved = localStorage.getItem('kotokoo_settings');
-    if (saved) {
-      try { return JSON.parse(saved).apiKey || ''; } catch (e) {}
+  const [showProfileSwitcher, setShowProfileSwitcher] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+
+  const handleFetchModels = async () => {
+    if (!userApiKey) {
+      showToast("Vui lòng nhập API Key trước khi kéo Model.");
+      return;
     }
-    return localStorage.getItem('api_key') || '';
-  });
-  const [userApiUrl, setUserApiUrl] = useState(() => {
-    const saved = localStorage.getItem('kotokoo_settings');
-    if (saved) {
-      try { return JSON.parse(saved).endpoint || ''; } catch (e) {}
+    setFetchingModels(true);
+    try {
+      const models = await fetchAvailableModels(userApiUrl, userApiKey);
+      setAvailableModels(models);
+      if (models.length > 0 && !models.includes(userModelName)) {
+        setUserModelName(models[0]);
+      }
+      showToast(`Đã kéo thành công ${models.length} model!`);
+    } catch (e) {
+      showToast("Lỗi khi kéo model: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setFetchingModels(false);
     }
-    return localStorage.getItem('api_url') || '';
-  });
-  const [userModelName, setUserModelName] = useState(() => {
-    const saved = localStorage.getItem('kotokoo_settings');
-    if (saved) {
-      try { return JSON.parse(saved).model || ''; } catch (e) {}
-    }
-    return localStorage.getItem('model_name') || '';
-  });
+  };
 
   useEffect(() => {
-    try {
-      localStorage.setItem('api_key', userApiKey);
-      localStorage.setItem('api_url', userApiUrl);
-      localStorage.setItem('model_name', userModelName);
-      
-      // Also sync with kotokoo_settings for global compatibility
-      const settings = { endpoint: userApiUrl, apiKey: userApiKey, model: userModelName };
-      localStorage.setItem('kotokoo_settings', JSON.stringify(settings));
-    } catch (e) {
-      console.error('Failed to save API settings to localStorage:', e);
-    }
-  }, [userApiKey, userApiUrl, userModelName]);
+    const loadData = async () => {
+      const savedProfiles = await getFromDB('profiles', 'dating_profiles');
+      if (savedProfiles) {
+        setProfiles(savedProfiles);
+      } else {
+        // Migration logic
+        const oldPrefs = JSON.parse(localStorage.getItem('dating_user_prefs') || '{"age":[],"personality":[],"gender":[],"hobbies":[],"career":[]}');
+        const oldFollowed = JSON.parse(localStorage.getItem('dating_followed_npcs') || '[]');
+        const oldAvatar = localStorage.getItem('dating_avatar') || npcImageLinks[0];
+        const oldBg = localStorage.getItem('dating_bg') || '';
+        const oldProfileBg = localStorage.getItem('dating_profile_bg') || '';
+        const oldChatBg = localStorage.getItem('dating_chat_bg') || '';
+        
+        const initialProfile: Profile = {
+          id: 'default',
+          name: 'Người dùng mới',
+          avatar: oldAvatar,
+          preferences: oldPrefs,
+          npcPreferences: { age: [], personality: [], gender: [], hobbies: [], career: [] },
+          followedNpcs: oldFollowed,
+          chatMessages: {},
+          contacts: [],
+          userPosts: [],
+          appBackground: oldBg,
+          profileBackground: oldProfileBg,
+          chatBackground: oldChatBg,
+          avatarBg: '#F3B4C2',
+          npcCustomAvatars: {},
+          npcCustomBgs: {},
+          chatMode: 'online',
+          novelMinChars: 500,
+          novelMaxChars: 2000
+        };
+        setProfiles([initialProfile]);
+      }
+
+      const savedCurrentProfileId = await getFromDB('settings', 'dating_current_profile_id');
+      if (savedCurrentProfileId) {
+        setCurrentProfileId(savedCurrentProfileId);
+      }
+
+      const savedSettings = await getFromDB('settings', 'kotokoo_settings');
+      if (savedSettings) {
+        setUserApiKey(savedSettings.apiKey || '');
+        setUserApiUrl(savedSettings.endpoint || '');
+        setUserModelName(savedSettings.model || '');
+        setUserIsUnlimited(savedSettings.isUnlimited || false);
+      }
+      setIsLoaded(true);
+    };
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    const saveData = async () => {
+      await saveToDB('profiles', 'dating_profiles', profiles);
+      await saveToDB('settings', 'dating_current_profile_id', currentProfileId);
+      await saveToDB('settings', 'kotokoo_settings', { 
+        apiKey: userApiKey, 
+        endpoint: userApiUrl, 
+        model: userModelName,
+        isUnlimited: userIsUnlimited
+      });
+    };
+    saveData();
+  }, [profiles, currentProfileId, userApiKey, userApiUrl, userModelName, userIsUnlimited, isLoaded]);
 
   const currentProfile = profiles.find(p => p.id === currentProfileId) || profiles[0] || {
     id: 'default',
@@ -511,8 +505,11 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           maxChars: novelMaxChars,
           avatarBg: avatarBg,
           chatMode: chatMode
-        }
+        },
+        { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName, isUnlimited: userIsUnlimited }
       );
+      
+      const responseContent = response.content;
       
       if (chatMode === 'online') {
         const bubbles = response.content.split(/\n+/).filter(b => b.trim().length > 0);
@@ -602,8 +599,11 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           maxChars: novelMaxChars,
           avatarBg: avatarBg,
           chatMode: chatMode
-        }
+        },
+        { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName }
       );
+      
+      const responseContent = response.content;
       
       if (chatMode === 'online') {
         const bubbles = response.content.split('\n').filter(b => b.trim().length > 0).slice(0, 20);
@@ -680,7 +680,15 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         };
 
         try {
-          const stream = await sendCoreMessageStream(prompt, [], koko, chatSettings);
+          const apiSettings = {
+            endpoint: userApiUrl,
+            apiKey: userApiKey,
+            model: userModelName,
+            systemPrompt: "Bạn là một chuyên gia tạo bài đăng cho ứng dụng hẹn hò.",
+            maxTokens: 100000,
+            isUnlimited: userIsUnlimited
+          };
+          const stream = await sendCoreMessageStream(prompt, [], koko, chatSettings, apiSettings);
           
           if (!stream.body) {
             throw new Error("Phản hồi từ API không có nội dung (stream body is null).");
@@ -820,6 +828,13 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         maxChars: 100,
         maxTokens: 50000,
         timeoutMinutes: 5
+      }, {
+        endpoint: userApiUrl,
+        apiKey: userApiKey,
+        model: userModelName,
+        systemPrompt: "Bạn là một hệ thống tạo bình luận tự động cho mạng xã hội hẹn hò.",
+        maxTokens: 50000,
+        isUnlimited: userIsUnlimited
       });
 
       if (!stream.body) {
@@ -950,6 +965,13 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         maxChars: 100,
         maxTokens: 50000,
         timeoutMinutes: 5
+      }, {
+        endpoint: userApiUrl,
+        apiKey: userApiKey,
+        model: userModelName,
+        systemPrompt: "Bạn là một hệ thống tạo bình luận từ NPC cho bài đăng của người dùng.",
+        maxTokens: 50000,
+        isUnlimited: userIsUnlimited
       });
 
       const lines = response.content.split('\n').filter(line => line.includes('|')).slice(0, totalComments);
@@ -1013,6 +1035,13 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         minChars: 1000,
         maxChars: 5000,
         maxTokens: 20000
+      }, {
+        endpoint: userApiUrl,
+        apiKey: userApiKey,
+        model: userModelName,
+        systemPrompt: `Bạn là ${npcName}, đang đăng 10 bài trên ứng dụng hẹn hò Sách Thế Giới.`,
+        maxTokens: 20000,
+        isUnlimited: userIsUnlimited
       });
 
       if (!stream.body) throw new Error("Phản hồi từ API không có nội dung.");
@@ -1380,9 +1409,12 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
             maxChars: chatMode === 'novel' ? novelMaxChars : 300,
             avatarBg: avatarBg,
             chatMode: chatMode
-          }
+          },
+          { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName }
         );
-        const newMsg: ChatMessage = { role: 'assistant', content: greeting.content };
+        
+        const greetingContent = greeting.content;
+        const newMsg: ChatMessage = { role: 'assistant', content: greetingContent };
         setChatMessages(prev => ({
           ...prev,
           [npcId]: [newMsg]
@@ -1925,14 +1957,49 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-[#8c8286] uppercase tracking-wider block mb-1.5 ml-1">Model Name</label>
-                  <input 
-                    type="text" 
-                    value={userModelName}
-                    onChange={e => setUserModelName(e.target.value)}
-                    placeholder="gpt-3.5-turbo"
-                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-[#F3B4C2] transition-colors"
-                  />
+                  <div className="flex justify-between items-center mb-1.5 ml-1">
+                    <label className="text-xs font-bold text-[#8c8286] uppercase tracking-wider block">Model Name</label>
+                    <button 
+                      onClick={handleFetchModels}
+                      disabled={fetchingModels}
+                      className="text-[10px] text-blue-600 font-bold hover:underline disabled:opacity-50"
+                    >
+                      {fetchingModels ? "Đang kéo..." : "Kéo Model"}
+                    </button>
+                  </div>
+                  {availableModels.length > 0 ? (
+                    <select 
+                      value={userModelName}
+                      onChange={e => setUserModelName(e.target.value)}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-[#F3B4C2] transition-colors"
+                    >
+                      {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  ) : (
+                    <input 
+                      type="text" 
+                      value={userModelName}
+                      onChange={e => setUserModelName(e.target.value)}
+                      placeholder="gemini-3-flash-preview"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-[#F3B4C2] transition-colors"
+                    />
+                  )}
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <div className={`w-10 h-5 rounded-full transition-colors relative ${userIsUnlimited ? 'bg-[#F3B4C2]' : 'bg-gray-200'}`}>
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${userIsUnlimited ? 'left-6' : 'left-1'}`} />
+                    </div>
+                    <input 
+                      type="checkbox" 
+                      checked={userIsUnlimited}
+                      onChange={e => setUserIsUnlimited(e.target.checked)}
+                      className="hidden"
+                    />
+                    <span className="text-xs font-bold text-[#5a5255]">Không giới hạn Token (Unlimited)</span>
+                  </label>
+                  <p className="text-[10px] text-gray-400 mt-1 ml-13">Bỏ qua giới hạn Token để NPC phản hồi dài và sâu sắc nhất.</p>
                 </div>
               </div>
 

@@ -90,6 +90,7 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const handleLogin = async () => {
     try {
@@ -392,7 +393,10 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const updateCurrentNovel = (updates: Partial<Novel>) => {
     if (!currentNovelId || !currentNovel) return;
     const updatedNovel = { ...currentNovel, ...updates, lastModified: Date.now() };
-    saveNovelToFirebase(updatedNovel);
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      saveNovelToFirebase(updatedNovel);
+    }, 1000);
   };
 
   const updateSettings = (updates: Partial<Novel['settings']>) => {
@@ -402,7 +406,10 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
       settings: { ...currentNovel.settings, ...updates },
       lastModified: Date.now()
     };
-    saveNovelToFirebase(updatedNovel);
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      saveNovelToFirebase(updatedNovel);
+    }, 1000);
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -931,6 +938,19 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
           </button>
           <button onClick={onBack} className="text-white/40 text-sm hover:text-white transition-colors">Quay lại</button>
         </div>
+      </div>
+    );
+  }
+
+  if (isAuthLoading) return <div className="flex items-center justify-center h-full text-white">Đang tải...</div>;
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 p-6 text-center">
+        <h2 className="text-2xl font-bold text-pink-500">Vui lòng đăng nhập</h2>
+        <p className="text-stone-400">Bạn cần đăng nhập bằng Google để lưu và quản lý tiểu thuyết của mình.</p>
+        <button onClick={handleLogin} className="bg-pink-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-pink-600 transition-all">
+          Đăng nhập với Google
+        </button>
       </div>
     );
   }
@@ -1548,6 +1568,7 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                           <div className="flex gap-4 text-[#777777] text-xs italic">
                             <span>{(content || '').split(/\s+/).filter(Boolean).length} từ</span>
                             <span>{(content || '').length} ký tự</span>
+                            <span>~{Math.round(((content || '').length) / 4).toLocaleString()} tokens</span>
                           </div>
                           <button onClick={handleGenerate} disabled={isGenerating} className="text-[#DB2777] font-bold flex items-center gap-1 text-sm hover:underline"><Sparkles size={16} /> Viết tiếp</button>
                         </div>

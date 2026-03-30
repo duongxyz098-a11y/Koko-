@@ -1,34 +1,28 @@
+let dbInstance: IDBDatabase | null = null;
+
 export const initKeyValueDB = (): Promise<IDBDatabase> => {
+  if (dbInstance) return Promise.resolve(dbInstance);
+
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('BanhNhoKV');
+    const request = indexedDB.open('BanhNhoKV', 4); // Increment version
     
     request.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains('backgrounds')) {
         db.createObjectStore('backgrounds');
       }
+      if (!db.objectStoreNames.contains('profiles')) {
+        db.createObjectStore('profiles');
+      }
+      if (!db.objectStoreNames.contains('settings')) {
+        db.createObjectStore('settings');
+      }
     };
 
     request.onsuccess = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains('backgrounds')) {
-        const currentVersion = db.version;
-        db.close();
-        
-        const upgradeReq = indexedDB.open('BanhNhoKV', currentVersion + 1);
-        upgradeReq.onupgradeneeded = (e) => {
-          const upgradeDb = (e.target as IDBOpenDBRequest).result;
-          if (!upgradeDb.objectStoreNames.contains('backgrounds')) {
-            upgradeDb.createObjectStore('backgrounds');
-          }
-        };
-        upgradeReq.onsuccess = () => resolve(upgradeReq.result);
-        upgradeReq.onerror = () => reject(upgradeReq.error);
-      } else {
-        resolve(db);
-      }
+      dbInstance = request.result;
+      resolve(dbInstance);
     };
-    
     request.onerror = () => reject(request.error);
   });
 };

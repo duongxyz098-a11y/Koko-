@@ -312,7 +312,27 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
             ) : subTab === '5.1' ? (
               <div className="p-4">
                 <button onClick={() => setSubTab(null)} className="mb-4 text-[#F3B4C2] font-bold bg-white/50 px-3 py-1 rounded-full">← Quay lại</button>
-                <h2 className="text-xl font-bold text-[#8A7D85]">Gắn Prompt/Preset, SYSTEM</h2>
+                <h2 className="text-xl font-bold text-[#8A7D85] mb-4">Gắn Prompt/Preset, SYSTEM</h2>
+                
+                <div className="bg-white/60 backdrop-blur-md rounded-2xl p-4 border border-[#F9C6D4] shadow-sm">
+                  <label className="block text-sm font-bold text-[#8A7D85] mb-2">System Instruction (Chỉ dẫn hệ thống)</label>
+                  <textarea 
+                    value={apiSettings.systemPrompt || ''}
+                    onChange={(e) => setApiSettings({...apiSettings, systemPrompt: e.target.value})}
+                    placeholder="VD: Bạn là một trợ lý nhập vai chuyên nghiệp. Hãy trả lời bằng tiếng Việt, sử dụng ngôn ngữ tự nhiên, giàu cảm xúc..."
+                    className="w-full h-64 p-4 rounded-xl border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] bg-white/50 text-sm resize-none"
+                  />
+                  <p className="text-xs text-[#9E919A] mt-2 italic">
+                    * Chỉ dẫn này sẽ được gửi kèm với mọi tin nhắn để định hình phong cách trả lời của AI.
+                  </p>
+                  
+                  <button 
+                    onClick={saveApiSettings}
+                    className="w-full mt-4 p-3 bg-[#F3B4C2] text-white rounded-xl font-bold shadow-md hover:bg-[#F9C6D4] transition-all"
+                  >
+                    Lưu cấu hình System
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="p-4">
@@ -720,6 +740,7 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
         <div className="fixed inset-0 z-[100] bg-white">
           <RoleplayChat 
             bot={roleplayBot} 
+            apiSettings={apiSettings}
             onBack={() => setRoleplayBot(null)} 
           />
         </div>

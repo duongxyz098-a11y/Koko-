@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { loadChat, saveChat, loadChatSettings, saveChatSettings } from '../../utils/db';
 import { compressImage } from '../../utils/imageUtils';
+import { sendMessage, ApiProxySettings } from '../../utils/apiProxy';
 
 interface Message {
   id: string;
@@ -33,12 +34,14 @@ interface ChatSettings {
 
 interface RoleplayChatProps {
   bot: any;
+  apiSettings: ApiProxySettings;
   onBack: () => void;
 }
 
-export const RoleplayChat: React.FC<RoleplayChatProps> = ({ bot, onBack }) => {
+export const RoleplayChat: React.FC<RoleplayChatProps> = ({ bot, apiSettings, onBack }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
   const [settings, setSettings] = useState<ChatSettings>({
     botBubbleColor: '#FFFFFF',
     userBubbleColor: '#FFFFFF',
@@ -83,19 +86,54 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({ bot, onBack }) => {
     setInputText('');
     await saveChat(bot.id || bot.name, updatedMessages);
 
-    // Simulate bot response (for now)
-    setTimeout(async () => {
+    // AI response
+    setIsTyping(true);
+    try {
+      // Prepare character info for AI
+      const characterInfo = [
+        `Name: ${bot.name}`,
+        `Occupation: ${bot.occupation}`,
+        `Hobbies: ${bot.hobbies}`,
+        `Appearance: ${bot.appearance}`,
+        `About: ${bot.about}`,
+        `History: ${bot.history}`,
+        bot.info ? `\nDetailed Info:\n${bot.info}` : "",
+        bot.personality ? `\nPersonality:\n${bot.personality}` : "",
+        bot.selectedStyles && bot.selectedStyles.length > 0 ? `\nWriting Styles:\n${bot.selectedStyles.join(", ")}` : "",
+        bot.customStyle ? `\nCustom Style Instruction:\n${bot.customStyle}` : ""
+      ].filter(Boolean).join("\n");
+
+      const chatHistory = updatedMessages.map(m => ({
+        role: m.sender === 'user' ? 'user' as const : 'assistant' as const,
+        content: m.text
+      }));
+
+      const responseText = await sendMessage(apiSettings, chatHistory, characterInfo);
+
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'bot',
-        text: `[${bot.name}] Đang suy nghĩ... (Tính năng AI đang được tích hợp)`,
+        text: responseText || `[${bot.name}] ...`,
         timestamp: Date.now(),
         type: 'text'
       };
+      
       const withBotResponse = [...updatedMessages, botMessage];
       setMessages(withBotResponse);
       await saveChat(bot.id || bot.name, withBotResponse);
-    }, 1000);
+    } catch (error: any) {
+      console.error("AI Error:", error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        sender: 'system',
+        text: `Lỗi: ${error.message || "Không thể kết nối với AI"}`,
+        timestamp: Date.now(),
+        type: 'event'
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const handleBackgroundUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -242,6 +280,22 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({ bot, onBack }) => {
             </div>
           );
         })}
+        
+        {isTyping && (
+          <div className="flex flex-row items-end gap-2.5 px-2">
+            <div className="w-10 h-10 rounded-full border border-[#E0E0E0] overflow-hidden flex-shrink-0 bg-white shadow-sm">
+              <img 
+                src={bot.avatar || 'https://picsum.photos/seed/bot/200'} 
+                alt="avatar"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+            <div className="bg-white border border-[#E0E0E0] p-3 rounded-2xl shadow-sm text-xs text-[#8A7D85] animate-pulse">
+              {bot.name} đang soạn tin nhắn...
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 

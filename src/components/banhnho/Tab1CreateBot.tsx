@@ -877,6 +877,13 @@ export default function Tab1CreateBot({ onSaveComplete }: { onSaveComplete?: () 
       setCardMediaImages(card.mediaImages || ["", "", "", ""]);
       setCardNavButtons(card.navButtons || ["Home", "Interests", "Art Comms"]);
       setCardLinks(card.links || ["", "", ""]);
+      
+      // Load detailed info if available
+      if (card.info) setInfo(card.info);
+      if (card.personality) setPersonality(card.personality);
+      if (card.selectedStyles) setSelectedStyles(card.selectedStyles);
+      if (card.customStyle) setCustomStyle(card.customStyle);
+      
       setSelectedCardIndex(index);
     }
   };
@@ -918,7 +925,12 @@ export default function Tab1CreateBot({ onSaveComplete }: { onSaveComplete?: () 
         bulletPoints: cardBulletPoints,
         mediaImages: cardMediaImages,
         navButtons: cardNavButtons,
-        links: cardLinks
+        links: cardLinks,
+        // Detailed info for AI
+        info: info,
+        personality: personality,
+        selectedStyles: selectedStyles,
+        customStyle: customStyle
       };
 
       if (selectedCardIndex !== null) {
@@ -1040,9 +1052,21 @@ export default function Tab1CreateBot({ onSaveComplete }: { onSaveComplete?: () 
       {/* Card 1: Thông tin cơ bản */}
       <div className="bg-[rgba(255,255,255,0.65)] backdrop-blur-md border border-[rgba(249,221,227,0.5)] shadow-[0_4px_20px_rgba(228,219,214,0.4)] rounded-2xl p-6 relative overflow-hidden">
         <div className="absolute inset-0 bg-[#F9C6D4] opacity-10 mix-blend-soft-light pointer-events-none"></div>
-        <h3 className="text-xl font-bold text-[#8A7D85] mb-4 flex items-center gap-2 drop-shadow-[0_0_12px_rgba(249,198,212,0.35)]">
-          <span className="bg-[#F3C6D1]/50 px-3 py-1 rounded-lg shadow-sm">Ô 1</span> Thông tin cơ bản & Ngoại hình
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-[#8A7D85] flex items-center gap-2 drop-shadow-[0_0_12px_rgba(249,198,212,0.35)]">
+            <span className="bg-[#F3C6D1]/50 px-3 py-1 rounded-lg shadow-sm">Ô 1</span> Thông tin cơ bản & Ngoại hình
+          </h3>
+          <button 
+            onClick={() => {
+              if (window.confirm('Bạn có muốn đặt lại về mẫu mặc định không?')) {
+                setInfo(TEMPLATE_1);
+              }
+            }}
+            className="text-xs font-bold text-[#F3B4C2] bg-white/50 px-3 py-1.5 rounded-full border border-[#F9C6D4] hover:bg-white/80 transition-all"
+          >
+            Đặt lại mẫu
+          </button>
+        </div>
         <textarea 
           value={info}
           onChange={(e) => setInfo(e.target.value)}
@@ -1054,9 +1078,21 @@ export default function Tab1CreateBot({ onSaveComplete }: { onSaveComplete?: () 
       {/* Card 2: Tính cách */}
       <div className="bg-[rgba(255,255,255,0.65)] backdrop-blur-md border border-[rgba(249,221,227,0.5)] shadow-[0_4px_20px_rgba(228,219,214,0.4)] rounded-2xl p-6 relative overflow-hidden">
         <div className="absolute inset-0 bg-[#F9C6D4] opacity-10 mix-blend-soft-light pointer-events-none"></div>
-        <h3 className="text-xl font-bold text-[#8A7D85] mb-4 flex items-center gap-2 drop-shadow-[0_0_12px_rgba(249,198,212,0.35)]">
-          <span className="bg-[#F3C6D1]/50 px-3 py-1 rounded-lg shadow-sm">Ô 2</span> Tính cách & Tâm lý
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-[#8A7D85] flex items-center gap-2 drop-shadow-[0_0_12px_rgba(249,198,212,0.35)]">
+            <span className="bg-[#F3C6D1]/50 px-3 py-1 rounded-lg shadow-sm">Ô 2</span> Tính cách & Tâm lý
+          </h3>
+          <button 
+            onClick={() => {
+              if (window.confirm('Bạn có muốn đặt lại về mẫu mặc định không?')) {
+                setPersonality(TEMPLATE_2);
+              }
+            }}
+            className="text-xs font-bold text-[#F3B4C2] bg-white/50 px-3 py-1.5 rounded-full border border-[#F9C6D4] hover:bg-white/80 transition-all"
+          >
+            Đặt lại mẫu
+          </button>
+        </div>
         <textarea 
           value={personality}
           onChange={(e) => setPersonality(e.target.value)}

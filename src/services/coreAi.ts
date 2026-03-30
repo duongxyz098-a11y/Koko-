@@ -1,3 +1,5 @@
+import { sendMessage, sendMessageStream, ApiProxySettings } from '../utils/apiProxy';
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -14,19 +16,74 @@ export interface KokoPrompt {
   ooc?: string;
 }
 
-export const sendCoreMessage = async (message: string, history: ChatMessage[] = [], koko?: KokoPrompt, settings?: any): Promise<{ content: string }> => {
-  return { content: "This is a placeholder response." };
+export const sendCoreMessage = async (
+  message: string, 
+  history: ChatMessage[] = [], 
+  koko?: KokoPrompt, 
+  settings?: any,
+  apiSettings?: ApiProxySettings
+): Promise<{ content: string }> => {
+  const systemInstruction = koko ? [
+    koko.systemPrompt,
+    koko.context,
+    koko.rules,
+    koko.length,
+    koko.ooc
+  ].filter(Boolean).join("\n") : "";
+
+  const messages = [...history, { role: 'user', content: message } as ChatMessage];
+  
+  const response = await sendMessage(
+    apiSettings || { endpoint: '', apiKey: '', model: '', systemPrompt: '', maxTokens: 3000 },
+    messages,
+    systemInstruction
+  );
+
+  return { content: response };
 };
 
-export const sendCoreMessageStream = async (message: string, history: ChatMessage[] = [], koko?: KokoPrompt, settings?: any): Promise<Response> => {
-  // Return a mock Response object that matches the expected behavior in DatingScreen.tsx
-  const mockStream = new ReadableStream({
-    start(controller) {
-      const encoder = new TextEncoder();
-      const content = JSON.stringify({ name: "Mock NPC", content: "Đây là nội dung bài đăng mẫu dài trên 500 ký tự để không bị lỗi. ".repeat(10) });
-      controller.enqueue(encoder.encode(content + "\n"));
-      controller.close();
-    }
-  });
-  return new Response(mockStream);
+export const sendCoreMessageStream = async (
+  message: string, 
+  history: ChatMessage[] = [], 
+  koko?: KokoPrompt, 
+  settings?: any,
+  apiSettings?: ApiProxySettings
+): Promise<Response> => {
+  const systemInstruction = koko ? [
+    koko.systemPrompt,
+    koko.context,
+    koko.rules,
+    koko.length,
+    koko.ooc
+  ].filter(Boolean).join("\n") : "";
+
+  const messages = [...history, { role: 'user', content: message } as ChatMessage];
+
+  const stream = await sendMessageStream(
+    apiSettings || { endpoint: '', apiKey: '', model: '', systemPrompt: '', maxTokens: 3000 },
+    messages,
+    systemInstruction
+  );
+
+  // If it's a Gemini stream, we need to convert it to a Response
+  if (stream && typeof (stream as any).stream === 'object') {
+    const readable = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        try {
+          for await (const chunk of (stream as any).stream) {
+            const text = chunk.text();
+            controller.enqueue(encoder.encode(text));
+          }
+          controller.close();
+        } catch (e) {
+          controller.error(e);
+        }
+      }
+    });
+    return new Response(readable);
+  }
+
+  // If it's already a ReadableStream (from fetch)
+  return new Response(stream as ReadableStream);
 };
