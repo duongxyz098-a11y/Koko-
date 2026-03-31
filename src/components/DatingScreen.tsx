@@ -100,8 +100,10 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const loadData = async () => {
+      let loadedProfiles: Profile[] = [];
       const savedProfiles = await getFromDB('profiles', 'dating_profiles');
       if (savedProfiles) {
+        loadedProfiles = savedProfiles;
         setProfiles(savedProfiles);
       } else {
         // Migration logic
@@ -132,12 +134,40 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           novelMinChars: 500,
           novelMaxChars: 2000
         };
+        loadedProfiles = [initialProfile];
         setProfiles([initialProfile]);
       }
 
       const savedCurrentProfileId = await getFromDB('settings', 'dating_current_profile_id');
+      let activeProfileId = 'default';
       if (savedCurrentProfileId) {
         setCurrentProfileId(savedCurrentProfileId);
+        activeProfileId = savedCurrentProfileId;
+      }
+
+      const activeProfile = loadedProfiles.find(p => p.id === activeProfileId) || loadedProfiles[0];
+      if (activeProfile) {
+        isSwitching.current = true;
+        setUserAvatar(activeProfile.avatar);
+        setUserPreferences(activeProfile.preferences);
+        setNpcPreferences(activeProfile.npcPreferences);
+        setFollowedNpcs(activeProfile.followedNpcs);
+        setChatMessages(activeProfile.chatMessages);
+        setContacts(activeProfile.contacts);
+        setAppBackground(activeProfile.appBackground);
+        setProfileBackground(activeProfile.profileBackground);
+        setChatBackground(activeProfile.chatBackground);
+        setAvatarBg(activeProfile.avatarBg || '#F3B4C2');
+        setNpcCustomAvatars(activeProfile.npcCustomAvatars || {});
+        setNpcCustomBgs(activeProfile.npcCustomBgs || {});
+        setChatMode(activeProfile.chatMode);
+        setNovelMinChars(activeProfile.novelMinChars);
+        setNovelMaxChars(activeProfile.novelMaxChars);
+        setUserPosts(activeProfile.userPosts || []);
+        
+        setTimeout(() => {
+          isSwitching.current = false;
+        }, 100);
       }
 
       const savedSettings = await getFromDB('settings', 'kotokoo_settings');
@@ -325,7 +355,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       novelMaxChars: novelMaxChars,
       userPosts: userPosts
     } : p));
-  }, [userAvatar, userPreferences, npcPreferences, followedNpcs, chatMessages, contacts, appBackground, profileBackground, chatBackground, chatMode, novelMinChars, novelMaxChars, userPosts, currentProfileId]);
+  }, [userAvatar, userPreferences, npcPreferences, followedNpcs, chatMessages, contacts, appBackground, profileBackground, chatBackground, avatarBg, npcCustomAvatars, npcCustomBgs, chatMode, novelMinChars, novelMaxChars, userPosts, currentProfileId]);
 
   const createNewProfile = () => {
     const name = prompt('Nhập tên cho tài khoản mới:', `Người dùng ${profiles.length + 1}`);

@@ -7,6 +7,7 @@ import { fetchAvailableModels, ApiProxySettings } from '../utils/apiProxy';
 import Tab1CreateBot from './banhnho/Tab1CreateBot';
 import BotCardGallery from './banhnho/BotCardGallery';
 import { RoleplayChat } from './banhnho/RoleplayChat';
+import GroupForum from './banhnho/GroupForum';
 
 export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('banhnho_active_tab') || 'tab1');
@@ -39,6 +40,7 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
     if (saved) {
       try { return JSON.parse(saved); } catch (e) {}
     }
+    
     return {
       endpoint: 'https://api.openai.com/v1',
       apiKey: '',
@@ -208,13 +210,13 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
         <div className="absolute inset-0 z-0 bg-[#F9C6D4] opacity-10 mix-blend-soft-light pointer-events-none" />
 
         {/* Upload Button */}
-        <div className="absolute top-4 right-4 z-20">
+        <div className="absolute bottom-24 right-4 z-20">
           <button 
             onClick={() => bgInputRef.current?.click()} 
-            className="p-2 bg-white/40 backdrop-blur-md rounded-full hover:bg-white/60 shadow-sm border border-white/20 transition-all"
+            className="p-3 bg-white/60 backdrop-blur-md rounded-full hover:bg-white/80 shadow-md border border-white/40 transition-all"
             title="Đổi ảnh nền"
           >
-            <ImageIcon size={20} className="text-[#F3B4C2]" />
+            <ImageIcon size={24} className="text-[#F3B4C2]" />
           </button>
         </div>
 
@@ -255,11 +257,24 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
       case 'tab2':
         return (
           <TabWrapper tabId="tab2">
-            <div className="flex flex-col items-center justify-center min-h-[60vh] text-[#9E919A] px-10 text-center">
-              <div className="text-6xl mb-6">🐾</div>
-              <h2 className="text-2xl font-bold mb-2">Diễn đàn Cộng đồng</h2>
-              <p>Nơi giao lưu và chia sẻ các nhân vật Bot Char đáng yêu. Tính năng đang được phát triển...</p>
-            </div>
+            <GroupForum 
+              apiSettings={apiSettings} 
+              setApiSettings={setApiSettings}
+              availableModels={availableModels}
+              isFetchingModels={isFetchingModels}
+              handleFetchModels={handleFetchModels}
+              saveApiSettings={saveApiSettings}
+              savedProfiles={savedProfiles}
+              setSavedProfiles={setSavedProfiles}
+              profileName={profileName}
+              setProfileName={setProfileName}
+              isProfileSaved={isProfileSaved}
+              setIsProfileSaved={setIsProfileSaved}
+              isSettingsSaved={isSettingsSaved}
+              setIsSettingsSaved={setIsSettingsSaved}
+              showToast={showToast}
+              onNavigateToTab={setActiveTab} 
+            />
           </TabWrapper>
         );
       case 'tab3':
@@ -649,13 +664,13 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
 
   const tabs = [
     { id: 'tab1', icon: <PlusCircle size={24} />, label: 'Tạo Bot' },
+    { id: 'tab8', icon: <Key size={24} />, label: 'API Key' },
     { id: 'tab2', icon: <PawPrint size={24} />, label: 'Diễn đàn' },
     { id: 'tab3', icon: <LayoutList size={24} />, label: 'Blog' },
     { id: 'tab4', icon: <Database size={24} />, label: 'Bộ nhớ' },
     { id: 'tab5', icon: <Settings size={24} />, label: 'Danh sách' },
     { id: 'tab6', icon: <Instagram size={24} />, label: 'Instagram' },
     { id: 'tab7', icon: <Clock size={24} />, label: 'Tương lai' },
-    { id: 'tab8', icon: <Key size={24} />, label: 'API Proxy' },
     { id: 'tab9', icon: <CreditCard size={24} />, label: 'Ngân hàng' },
     { id: 'tab10', icon: <Info size={24} />, label: 'About' },
     { id: 'tab11', icon: <Youtube size={24} />, label: 'YouTube' },

@@ -3,6 +3,8 @@ import { ChevronLeft, Plus, Image as ImageIcon } from 'lucide-react';
 import { sendCoreMessageStream } from '../../services/coreAi';
 import { compressImage } from '../../utils/imageUtils';
 import { ApiProxySettings } from '../../utils/apiProxy';
+import { loadApiSettings } from '../../utils/settings';
+import { debounce } from '../../utils/utils';
 
 export default function NotebooksView({ char, onBack }: { char: any, onBack: () => void }) {
   const [openedNotebook, setOpenedNotebook] = useState<number | null>(null);
@@ -64,20 +66,7 @@ export default function NotebooksView({ char, onBack }: { char: any, onBack: () 
     try {
       const prompt = `Viết nội dung cho cuốn sổ "${notebooks[openedNotebook! - 1].title}" của nhân vật ${char.name}. Độ dài yêu cầu: khoảng ${targetLength} ký tự. Thông tin nhân vật: ${char.history} ${char.personality}`;
       
-      const settingsStr = localStorage.getItem('koko_api_settings');
-      let apiSettings: ApiProxySettings = { 
-        endpoint: '', 
-        apiKey: '', 
-        model: 'gemini-3-flash-preview', 
-        maxTokens: 100000, 
-        timeoutMinutes: 20 
-      };
-      if (settingsStr) {
-        try { 
-          const parsed = JSON.parse(settingsStr);
-          apiSettings = { ...apiSettings, ...parsed };
-        } catch(e){}
-      }
+      const apiSettings = loadApiSettings();
 
       const response = await sendCoreMessageStream(
         prompt, [], 
@@ -88,22 +77,34 @@ export default function NotebooksView({ char, onBack }: { char: any, onBack: () 
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
+      let buffer = '';
+
       if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-              try {
-                const json = JSON.parse(line.slice(6));
-                if (json.choices?.[0]?.delta?.content) {
-                  setContent(prev => prev + json.choices[0].delta.content);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                try {
+                  const json = JSON.parse(line.slice(6));
+                  if (json.choices?.[0]?.delta?.content) {
+                    setContent(prev => prev + json.choices[0].delta.content);
+                  }
+                } catch(e) {
+                  console.error("Error parsing JSON chunk:", e, line);
                 }
-              } catch(e){}
+              }
             }
           }
+        } finally {
+          reader.releaseLock();
         }
       }
     } catch (e) {
@@ -113,6 +114,10 @@ export default function NotebooksView({ char, onBack }: { char: any, onBack: () 
       setLoading(false);
     }
   };
+
+  const handleGenerateDebounced = useRef(
+    debounce(handleGenerate, 1000)
+  ).current;
 
   if (openedNotebook !== null) {
     return (
@@ -131,7 +136,7 @@ export default function NotebooksView({ char, onBack }: { char: any, onBack: () 
             className="w-24 p-2 rounded-lg border border-[#F9C6D4] outline-none text-sm bg-white/80"
           />
           <button 
-            onClick={handleGenerate}
+            onClick={handleGenerateDebounced}
             disabled={loading}
             className="bg-[#F3B4C2] text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-1 shadow-sm"
           >

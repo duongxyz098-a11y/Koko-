@@ -19,11 +19,18 @@ import {
   X,
   Book,
   CheckCircle,
-  RefreshCw
+  RefreshCw,
+  Download,
+  Upload
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { compressImage } from '../utils/imageUtils';
-import { getAllStories, saveStory, deleteStory as deleteStoryFromDB } from '../utils/db';
+import { getAllStories, getAllKikokoStories, saveKikokoStory, deleteKikokoStory, clearAllKikokoStories } from '../utils/db';
+import { db, auth } from '../firebase';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, getDoc } from 'firebase/firestore';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { handleFirestoreError, OperationType } from '../utils/errorHandlers';
+import Modal from './ui/Modal';
 
 interface KikokoChapter {
   id: string;
@@ -119,44 +126,148 @@ const DIRECTIONS = [
   "Người dùng tự đề xuất ý tưởng"
 ];
 
+const DEFAULT_BACKGROUND = 'https://picsum.photos/seed/kikoko/1920/1080';
+
 export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [stories, setStories] = useState<KikokoStory[]>([]);
+  const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadStories = async () => {
-      const savedStories = await getAllStories();
-      if (savedStories.length > 0) {
-        setStories(savedStories);
-      } else {
-        // Migration: Try to load from old localStorage if IndexedDB is empty
-        const savedIds = localStorage.getItem('kikoko_story_ids');
-        if (savedIds) {
-          try {
-            const ids = JSON.parse(savedIds);
-            const migratedStories = ids.map((id: string) => {
-              const savedStory = localStorage.getItem(`kikoko_story_${id}`);
-              return savedStory ? JSON.parse(savedStory) : null;
-            }).filter(Boolean);
-            
-            // Save to IndexedDB
-            for (const story of migratedStories) {
-              await saveStory(story);
+    let unsubscribe: () => void;
+    let unsubApi: () => void;
+    let unsubGallery: () => void;
+
+    const loadLocalStories = async () => {
+      // 1. Try to migrate from localStorage if it exists
+      const savedIds = localStorage.getItem('kikoko_story_ids');
+      if (savedIds) {
+        try {
+          const ids = JSON.parse(savedIds);
+          for (const id of ids) {
+            const storyData = localStorage.getItem(`kikoko_story_${id}`);
+            if (storyData) {
+              const story = JSON.parse(storyData);
+              await saveKikokoStory(story);
+              // Don't remove from localStorage yet, wait until we're sure it's in IndexedDB
             }
-            setStories(migratedStories);
-            
-            // Cleanup localStorage
-            localStorage.removeItem('kikoko_story_ids');
-            ids.forEach((id: string) => localStorage.removeItem(`kikoko_story_${id}`));
-          } catch (e) {
-            console.error('Migration failed:', e);
           }
+          // After migration, we can remove the IDs to avoid re-migration
+          localStorage.removeItem('kikoko_story_ids');
+        } catch (e) {
+          console.error('Migration from localStorage failed:', e);
         }
       }
+
+      // 2. Try to migrate from main stories store if they look like Kikoko stories
+      try {
+        const allMainStories = await getAllStories();
+        for (const story of allMainStories) {
+          // Check if it's a Kikoko story (has images in first chapter or specific fields)
+          const isKikoko = story.chapters?.[0]?.images || story.memory !== undefined;
+          if (isKikoko) {
+            const existingKikoko = await getAllKikokoStories();
+            if (!existingKikoko.find((s: any) => s.id === story.id)) {
+              await saveKikokoStory(story);
+              console.log('Migrated Kikoko story from main store:', story.id);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Migration from main store failed:', e);
+      }
+
+      // 3. Load from IndexedDB
+      const savedStories = await getAllKikokoStories();
+      if (savedStories.length > 0) {
+        setStories(savedStories);
+        setLoading(false);
+      }
     };
-    loadStories();
+
+    loadLocalStories();
+
+    const authUnsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (!currentUser) {
+        setLoading(false);
+        return;
+      }
+
+      const userId = currentUser.uid;
+      const q = query(collection(db, `users/${userId}/kikoko_stories`));
+      
+      // Load settings from Firestore with onSnapshot
+      unsubApi = onSnapshot(doc(db, `users/${userId}/settings`, 'kikoko_api'), (doc) => {
+        if (doc.exists()) {
+          setApiSettings(doc.data() as ApiSettings);
+        }
+      });
+
+      unsubGallery = onSnapshot(doc(db, `users/${userId}/settings`, 'kikoko_gallery'), (doc) => {
+        if (doc.exists()) {
+          setGalleryBackground(doc.data().background);
+        }
+      });
+
+      unsubscribe = onSnapshot(q, async (snapshot) => {
+        const storiesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as KikokoStory));
+        
+        const localStories = await getAllKikokoStories();
+        const mergedStories = [...storiesData];
+        const firestoreStoryIds = new Set(storiesData.map(s => s.id));
+        
+        let needsUpload = false;
+        for (const localStory of localStories) {
+          if (!firestoreStoryIds.has(localStory.id)) {
+            mergedStories.push(localStory);
+            needsUpload = true;
+          }
+        }
+        
+        mergedStories.sort((a, b) => b.updatedAt - a.updatedAt);
+        setStories(mergedStories);
+        
+        // Sync IndexedDB cache: Update local with Firestore data
+        for (const story of storiesData) {
+          await saveKikokoStory(story);
+        }
+        
+        // Upload any local stories that were missing from Firestore
+        if (needsUpload && !snapshot.metadata.fromCache) {
+          for (const localStory of localStories) {
+            if (!firestoreStoryIds.has(localStory.id)) {
+              await setDoc(doc(db, `users/${userId}/kikoko_stories`, localStory.id), localStory);
+            }
+          }
+        }
+        
+        setLoading(false);
+      }, (err) => {
+        console.error('Failed to fetch kikoko stories from Firebase', err);
+        setLoading(false);
+      });
+    });
+
+    return () => {
+      authUnsubscribe();
+      if (unsubscribe) unsubscribe();
+      // @ts-ignore
+      if (typeof unsubApi === 'function') unsubApi();
+      // @ts-ignore
+      if (typeof unsubGallery === 'function') unsubGallery();
+    };
   }, []);
-  const [currentStoryId, setCurrentStoryId] = useState<string | null>(null);
+  const [currentStoryId, setCurrentStoryId] = useState<string | null>(() => localStorage.getItem('kikoko_current_story_id'));
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
+  useEffect(() => {
+    if (currentStoryId) {
+      localStorage.setItem('kikoko_current_story_id', currentStoryId);
+    } else {
+      localStorage.removeItem('kikoko_current_story_id');
+    }
+  }, [currentStoryId]);
+
   const [isEditing, setIsEditing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -211,11 +322,31 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [visibleCommentsCount, setVisibleCommentsCount] = useState(50);
   const [estimatedTime, setEstimatedTime] = useState<number | null>(null);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'info' | 'warning' | 'error' | 'success';
+    onConfirm?: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+
+  const showAlert = (title: string, message: string, type: 'info' | 'warning' | 'error' | 'success' = 'info') => {
+    setModalConfig({ isOpen: true, title, message, type });
+  };
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void, type: 'warning' | 'error' = 'warning') => {
+    setModalConfig({ isOpen: true, title, message, type, onConfirm });
+  };
+
   const [galleryBackground, setGalleryBackground] = useState<string>(() => {
     return localStorage.getItem('kikoko_gallery_background') || '';
   });
-  const justFinishedGenerationRef = useRef(false);
-  
+
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => {
     const saved = localStorage.getItem('kikoko_api_settings');
     return saved ? JSON.parse(saved) : {
@@ -235,6 +366,24 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       ]
     };
   });
+
+  useEffect(() => {
+    if (auth.currentUser && apiSettings) {
+      setDoc(doc(db, `users/${auth.currentUser.uid}/settings`, 'kikoko_api'), apiSettings)
+        .catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${auth.currentUser?.uid}/settings/kikoko_api`));
+    }
+    localStorage.setItem('kikoko_api_settings', JSON.stringify(apiSettings));
+  }, [apiSettings]);
+
+  useEffect(() => {
+    if (auth.currentUser && galleryBackground) {
+      setDoc(doc(db, `users/${auth.currentUser.uid}/settings`, 'kikoko_gallery'), { background: galleryBackground })
+        .catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${auth.currentUser?.uid}/settings/kikoko_gallery`));
+    }
+    localStorage.setItem('kikoko_gallery_background', galleryBackground);
+  }, [galleryBackground]);
+
+  const justFinishedGenerationRef = useRef(false);
 
   const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'api' | 'system'>('general');
   const [newPromptName, setNewPromptName] = useState('');
@@ -261,7 +410,6 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     
     const updatedSettings = { ...apiSettings, systemPrompts: updatedPrompts };
     setApiSettings(updatedSettings);
-    localStorage.setItem('kikoko_api_settings', JSON.stringify(updatedSettings));
     
     // Reset inputs
     setNewPromptName('');
@@ -273,7 +421,6 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     const updatedPrompts = (apiSettings.systemPrompts || []).filter(p => p.id !== id);
     const updatedSettings = { ...apiSettings, systemPrompts: updatedPrompts };
     setApiSettings(updatedSettings);
-    localStorage.setItem('kikoko_api_settings', JSON.stringify(updatedSettings));
     if (editingPromptId === id) {
       setNewPromptName('');
       setNewPromptContent('');
@@ -338,17 +485,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const currentChapter = currentStory?.chapters[currentChapterIndex];
 
   useEffect(() => {
-    // Cleanup old localStorage data if it exists
-    const savedIds = localStorage.getItem('kikoko_story_ids');
-    if (savedIds) {
-      try {
-        const ids = JSON.parse(savedIds);
-        localStorage.removeItem('kikoko_story_ids');
-        ids.forEach((id: string) => localStorage.removeItem(`kikoko_story_${id}`));
-      } catch (e) {
-        console.error('Cleanup failed:', e);
-      }
-    }
+    // No-op cleanup to avoid data loss
   }, []);
 
   useEffect(() => {
@@ -371,7 +508,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     setCurrentChapterIndex(0);
   }, [currentStoryId]);
 
-  const createNewStory = () => {
+  const createNewStory = async () => {
     const newStory: KikokoStory = {
       id: Date.now().toString(),
       title: 'Tiểu thuyết Kikoko mới',
@@ -401,18 +538,42 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       createdAt: Date.now()
     };
     setStories([newStory, ...stories]);
-    saveStory(newStory);
+    
+    // Save to IndexedDB
+    await saveKikokoStory(newStory);
+    
+    // Save to Firebase if logged in
+    if (auth.currentUser) {
+      try {
+        await setDoc(doc(db, `users/${auth.currentUser.uid}/kikoko_stories`, newStory.id), newStory);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${auth.currentUser.uid}/kikoko_stories/${newStory.id}`);
+      }
+    }
+
     setCurrentStoryId(newStory.id);
     setCurrentChapterIndex(0);
     setIsEditing(true);
   };
 
-  const updateStory = (updates: Partial<KikokoStory>) => {
+  const updateStory = async (updates: Partial<KikokoStory>) => {
     if (!currentStoryId) return;
     const updatedStories = stories.map(s => s.id === currentStoryId ? { ...s, ...updates } : s);
     setStories(updatedStories);
     const updatedStory = updatedStories.find(s => s.id === currentStoryId);
-    if (updatedStory) saveStory(updatedStory);
+    if (updatedStory) {
+      // Save to IndexedDB
+      await saveKikokoStory(updatedStory);
+      
+      // Save to Firebase if logged in
+      if (auth.currentUser) {
+        try {
+          await setDoc(doc(db, `users/${auth.currentUser.uid}/kikoko_stories`, updatedStory.id), updatedStory);
+        } catch (e) {
+          console.error('Failed to save kikoko story to Firebase', e);
+        }
+      }
+    }
   };
 
   const updateChapter = (updates: Partial<KikokoChapter>, index?: number) => {
@@ -529,7 +690,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
   const fetchModels = async () => {
     if (!apiSettings.proxyEndpoint || !apiSettings.apiKey) {
-      alert('Vui lòng nhập đầy đủ Proxy Endpoint và API Key.');
+      showAlert('Thiếu thông tin', 'Vui lòng nhập đầy đủ Proxy Endpoint và API Key.', 'warning');
       return;
     }
     
@@ -561,9 +722,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         const modelIds = rawModels.map((m: any) => (typeof m === 'string' ? m : m.id));
         setAvailableModels(modelIds);
         if (modelIds.length > 0) {
-          alert(`Đã tải thành công ${modelIds.length} model.`);
+          showAlert('Thành công', `Đã tải thành công ${modelIds.length} model.`, 'success');
         } else {
-          alert('Không tìm thấy model nào trong phản hồi từ API.');
+          showAlert('Thông báo', 'Không tìm thấy model nào trong phản hồi từ API.', 'info');
         }
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -571,7 +732,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       }
     } catch (err: any) {
       console.error('Error fetching models:', err);
-      alert(`Lỗi khi tải danh sách model: ${err.message}`);
+      showAlert('Lỗi kết nối', `Lỗi khi tải danh sách model: ${err.message}`, 'error');
     } finally {
       setIsFetchingModels(false);
     }
@@ -581,7 +742,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     if (!currentStory || isGenerating) return;
     
     if (!apiSettings.apiKey) {
-      alert('Vui lòng cài đặt API Key trong phần Cài đặt hệ thống');
+      showAlert('Thiếu API Key', 'Vui lòng cài đặt API Key trong phần Cài đặt hệ thống', 'warning');
       return;
     }
 
@@ -610,37 +771,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     try {
       const finalDirection = directionOverride || targetChapter.direction;
       
-      // Start Fast Display Timer
-      // Types characters from fullTextBuffer into streamingContent at a dynamic pace
-      displayIntervalId = setInterval(() => {
-        if (displayedText.length < fullTextBuffer.length) {
-          const timeElapsed = Date.now() - startTime;
-          const timeRemaining = Math.max(1000, targetDurationMs - timeElapsed);
-          const charsRemaining = fullTextBuffer.length - displayedText.length;
-          
-          let charsToType = 25;
-          if (isApiDone) {
-            if (timeElapsed >= targetDurationMs) {
-              charsToType = 50; // Type fast if we're past the target duration
-            } else {
-              charsToType = Math.max(1, Math.ceil(charsRemaining / (timeRemaining / 30)));
-            }
-          } else {
-            charsToType = Math.max(1, Math.ceil(charsRemaining / (targetDurationMs / 30)));
-            charsToType = Math.min(charsToType, 25);
-          }
-          
-          const nextBatch = fullTextBuffer.slice(displayedText.length, displayedText.length + charsToType);
-          displayedText += nextBatch;
-          setStreamingContent(displayedText);
-        }
-
-        // Check if we should finish: Only when API is done and all text is displayed
-        if (isApiDone && displayedText.length >= fullTextBuffer.length) {
-          clearInterval(displayIntervalId);
-          finishGeneration();
-        }
-      }, 30);
+      // Removed simulated typing effect for better performance
 
       const finishGeneration = () => {
         const npcRegex = /\[NPC: (.*?)\]: (.*?)(?=\n|\[NPC:|$)/g;
@@ -698,16 +829,16 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         const currentContent = isRegenerate ? '' : targetChapter.content;
         const targetTokens = apiSettings.isUnlimited ? 4000000 : apiSettings.maxTokens;
         
-        const prompt = `Hãy viết tiếp chương này cho tiểu thuyết "${currentStory.title}".
+        const prompt = `Hãy viết tiếp chương này cho tiểu thuyết "${currentStory?.title}".
         
         [THÔNG TIN TRUYỆN]
-        Cốt truyện: ${currentStory.plot}
-        Nhân vật Bot: ${currentStory.botChar}
-        Nhân vật User: ${currentStory.userChar}
-        Phong cách: ${currentStory.style}
-        Prompt bổ sung: ${currentStory.prompt}
-        ${currentStory.memory ? `Ghi nhớ tóm tắt các chương trước: ${currentStory.memory}` : ''}
-        ${currentStory.characterMemory ? `Ghi nhớ về các nhân vật (chính, phụ, NPC): ${currentStory.characterMemory}` : ''}
+        Cốt truyện: ${currentStory?.plot}
+        Nhân vật Bot: ${currentStory?.botChar}
+        Nhân vật User: ${currentStory?.userChar}
+        Phong cách: ${currentStory?.style}
+        Prompt bổ sung: ${currentStory?.prompt}
+        ${currentStory?.memory ? `Ghi nhớ tóm tắt các chương trước: ${currentStory?.memory}` : ''}
+        ${currentStory?.characterMemory ? `Ghi nhớ về các nhân vật (chính, phụ, NPC): ${currentStory?.characterMemory}` : ''}
         ${feedback ? `\n[PHẢN HỒI TỪ NGƯỜI DÙNG - HÃY SỬA LỖI VÀ LÀM TỐT HƠN]:\n${feedback}` : ''}
         
         [HƯỚNG ĐI CHƯƠNG MỚI - QUAN TRỌNG NHẤT]: ${finalDirection || 'Phát triển tự nhiên'}
@@ -802,7 +933,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 try {
                   const data = JSON.parse(trimmedLine.slice(6));
                   if (data.choices?.[0]?.delta?.content) {
-                    fullTextBuffer += data.choices[0].delta.content;
+                    const content = data.choices[0].delta.content;
+                    fullTextBuffer += content;
+                    setStreamingContent(prev => prev + content);
                   }
                 } catch (e) {}
               }
@@ -812,6 +945,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             throw e;
           }
         }
+        
+        finishGeneration();
       } catch (apiError: any) {
         if (apiError.name !== 'AbortError') {
           throw apiError;
@@ -826,12 +961,12 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       console.error(error);
       if (error.name === 'AbortError') {
         if (fullTextBuffer.length === 0) {
-          alert('Thời gian chờ quá lâu. Hệ thống đã tự động ngắt kết nối.');
+          showAlert('Hết thời gian', 'Thời gian chờ quá lâu. Hệ thống đã tự động ngắt kết nối.', 'warning');
           setIsGenerating(false);
           setEstimatedTime(null);
         }
       } else {
-        alert(`Lỗi: ${error.message || 'Không thể kết nối với API'}`);
+        showAlert('Lỗi API', `Lỗi: ${error.message || 'Không thể kết nối với API'}`, 'error');
         setIsGenerating(false);
         setEstimatedTime(null);
       }
@@ -851,7 +986,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       feedbackLog: [...(currentStory.feedbackLog || []), feedbackText]
     };
     
-    await saveStory(updatedStory);
+    await saveKikokoStory(updatedStory);
     setStories(stories.map(s => s.id === currentStory.id ? updatedStory : s));
     
     setShowFeedbackModal(false);
@@ -956,13 +1091,13 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           memory: newMemory,
           characterMemory: newCharMemory
         });
-        alert('Đã tự động tóm tắt và lưu vào ghi nhớ dài hạn!');
+        showAlert('Thành công', 'Đã tự động tóm tắt và lưu vào ghi nhớ dài hạn!', 'success');
       } else {
         setShowSummaryModal(true);
       }
     } catch (error) {
       console.error(error);
-      alert('Không thể tóm tắt.');
+      showAlert('Lỗi', 'Không thể tóm tắt.', 'error');
     } finally {
       setIsSummarizing(false);
     }
@@ -1060,15 +1195,27 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       }
     } catch (error: any) {
       console.error(error);
-      alert(`Lỗi khi tạo tương tác NPC: ${error.message || 'Không thể kết nối với API'}`);
+      showAlert('Lỗi NPC', `Lỗi khi tạo tương tác NPC: ${error.message || 'Không thể kết nối với API'}`, 'error');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const deleteStory = (id: string) => {
+  const deleteStory = async (id: string) => {
     setStories(stories.filter(s => s.id !== id));
-    deleteStoryFromDB(id);
+    
+    // Delete from IndexedDB
+    await deleteKikokoStory(id);
+    
+    // Delete from Firebase if logged in
+    if (auth.currentUser) {
+      try {
+        await deleteDoc(doc(db, `users/${auth.currentUser.uid}/kikoko_stories`, id));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `users/${auth.currentUser.uid}/kikoko_stories/${id}`);
+      }
+    }
+    
     setDeleteConfirmId(null);
   };
 
@@ -1099,16 +1246,28 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     const input = document.createElement('input');
                     input.type = 'file';
                     input.accept = 'application/json';
-                    input.onchange = (e) => {
+                    input.onchange = async (e) => {
                       const file = (e.target as HTMLInputElement).files?.[0];
                       if (file) {
                         const reader = new FileReader();
-                        reader.onload = (e) => {
+                        reader.onload = async (e) => {
                           try {
                             const data = JSON.parse(e.target?.result as string);
-                            setStories(data);
-                          } catch (e) {
-                            alert('Tệp tin không hợp lệ.');
+                            if (Array.isArray(data)) {
+                              setStories(data);
+                              // Save to IndexedDB and Firestore
+                              for (const story of data) {
+                                await saveKikokoStory(story);
+                                if (userId) {
+                                  await setDoc(doc(db, `users/${userId}/kikoko_stories`, story.id), story);
+                                }
+                              }
+                              showAlert('Thành công', 'Đã nhập dữ liệu JSON thành công!', 'success');
+                            } else {
+                              showAlert('Lỗi', 'Định dạng dữ liệu không đúng.', 'error');
+                            }
+                          } catch (err) {
+                            showAlert('Lỗi', 'Tệp tin không hợp lệ.', 'error');
                           }
                         };
                         reader.readAsText(file);
@@ -1116,10 +1275,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     };
                     input.click();
                   }}
-                  className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors"
-                  title="Nhập dữ liệu (Khôi phục)"
+                  className="px-3 py-2 text-[#F9C6D4] hover:bg-pink-50 rounded-lg transition-colors flex items-center gap-2 border border-[#F9C6D4]/30"
+                  title="Nhập JSON (Khôi phục)"
                 >
-                  <BookOpen size={24} />
+                  <Upload size={20} />
+                  <span className="hidden sm:inline text-sm font-medium">Nhập JSON</span>
                 </button>
                 <button 
                   onClick={() => {
@@ -1132,10 +1292,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     a.click();
                     URL.revokeObjectURL(url);
                   }}
-                  className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors"
-                  title="Xuất dữ liệu (Sao lưu)"
+                  className="px-3 py-2 text-[#F9C6D4] hover:bg-pink-50 rounded-lg transition-colors flex items-center gap-2 border border-[#F9C6D4]/30"
+                  title="Tải JSON (Sao lưu)"
                 >
-                  <Save size={24} />
+                  <Download size={20} />
+                  <span className="hidden sm:inline text-sm font-medium">Tải JSON</span>
                 </button>
                 <button 
                   onClick={() => fileInputRefs.galleryBackground.current?.click()} 
@@ -1173,11 +1334,12 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     className="bg-white rounded-2xl p-4 shadow-sm border border-[#EACFD5] cursor-pointer hover:shadow-md transition-shadow flex gap-4"
                   >
                     <div className="w-24 h-32 bg-[#FAF9F6] rounded-lg flex items-center justify-center border border-dashed border-[#EACFD5] overflow-hidden">
-                      {story.chapters[0]?.images.top ? (
-                        <img src={story.chapters[0].images.top} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      ) : (
-                        <BookOpen size={32} className="text-[#EACFD5]" />
-                      )}
+                      <img 
+                        src={story.chapters[0]?.images.top || story.background || DEFAULT_BACKGROUND} 
+                        className="w-full h-full object-cover" 
+                        referrerPolicy="no-referrer" 
+                        alt={story.title}
+                      />
                     </div>
                     <div className="flex-1 flex flex-col justify-between py-1">
                       <div>
@@ -1262,7 +1424,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           <button onClick={() => setCurrentStoryId(null)} className="p-2 hover:bg-white rounded-full transition-colors">
             <ArrowLeft size={20} className="text-[#555555]" />
           </button>
-          <span className="font-serif italic text-[#555555] truncate max-w-[150px]">{currentStory.title}</span>
+          <span className="font-serif italic text-[#555555] truncate max-w-[150px]">{currentStory?.title}</span>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-white rounded-full transition-colors">
@@ -1511,7 +1673,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           <span>Trước</span>
         </button>
         <span className="text-sm font-medium text-[#777777]">
-          Chương {currentChapterIndex + 1} / {currentStory.chapters.length}
+          Chương {currentChapterIndex + 1} / {currentStory?.chapters?.length || 0}
         </span>
         <div className="flex items-center gap-4">
           <button 
@@ -1538,7 +1700,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           </button>
         </div>
         <button 
-          disabled={currentChapterIndex === currentStory.chapters.length - 1}
+          disabled={currentChapterIndex === (currentStory?.chapters?.length || 1) - 1}
           onClick={() => setCurrentChapterIndex(currentChapterIndex + 1)}
           className="flex items-center gap-1 text-[#555555] disabled:opacity-30"
         >
@@ -1837,7 +1999,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     if (summaryConfig.type === 'auto') {
                       updateStory({ autoSummarizeInterval: summaryConfig.autoInterval });
                       setShowSummaryConfigModal(false);
-                      alert('Đã lưu cấu hình tự động tóm tắt!');
+                      showAlert('Thành công', 'Đã lưu cấu hình tự động tóm tắt!', 'success');
                     } else {
                       executeSummary(summaryConfig);
                     }
@@ -1921,7 +2083,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       memory: newMemory,
                       characterMemory: newCharMemory
                     });
-                    alert('Đã lưu vào Ghi nhớ dài hạn (Cốt truyện & Nhân vật)!');
+                    showAlert('Thành công', 'Đã lưu vào Ghi nhớ dài hạn (Cốt truyện & Nhân vật)!', 'success');
                     setShowSummaryModal(false);
                   }}
                   className="w-full py-3 bg-[#F9C6D4] text-white rounded-xl font-bold hover:bg-[#F9C6D4]/90 shadow-md transition-all active:scale-95"
@@ -1930,7 +2092,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 </button>
                 <div className="flex gap-2">
                   <button 
-                    onClick={() => { navigator.clipboard.writeText(summary); alert('Đã sao chép!'); }}
+                    onClick={() => { 
+                      navigator.clipboard.writeText(summary); 
+                      showAlert('Đã sao chép', 'Đã sao chép nội dung tóm tắt vào bộ nhớ tạm!', 'success');
+                    }}
                     className="flex-1 py-3 bg-white border border-[#F9C6D4] text-[#F9C6D4] rounded-xl font-bold hover:bg-[#FAF9F6] transition-colors"
                   >
                     Sao chép tất cả
@@ -1994,7 +2159,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     <div className="space-y-2">
                       <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Tên tiểu thuyết</label>
                       <input 
-                        value={currentStory.title}
+                        value={currentStory?.title || ''}
                         onChange={(e) => updateStory({ title: e.target.value })}
                         className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
                       />
@@ -2400,7 +2565,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                                       : [...currentIds, prompt.id];
                                     updateStory({ systemPromptIds: newIds });
                                     if (!isSelected) {
-                                      alert(`Đã liên kết văn phong "${prompt.name}"!`);
+                                      showAlert('Thành công', `Đã liên kết văn phong "${prompt.name}"!`, 'success');
                                     }
                                   }}
                                   className={`p-2 transition-colors ${currentStory.systemPromptIds?.includes(prompt.id) ? 'text-[#F9C6D4]' : 'text-gray-400 hover:text-[#F9C6D4]'}`}
@@ -2810,7 +2975,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
               <button onClick={() => setShowChapterDrawer(false)}><X /></button>
             </div>
             <div className="space-y-2">
-              {currentStory?.chapters.map((chapter, index) => (
+              {currentStory?.chapters?.map((chapter, index) => (
                 <div key={chapter.id} className="flex items-center gap-2 group">
                   <button
                     onClick={() => {
@@ -2821,7 +2986,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                   >
                     {chapter.title}
                   </button>
-                  {currentStory.chapters.length > 1 && (
+                  {(currentStory?.chapters?.length || 0) > 1 && (
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2947,6 +3112,15 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig({ ...modalConfig, isOpen: false })}
+        onConfirm={modalConfig.onConfirm}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+      />
     </div>
   );
 }

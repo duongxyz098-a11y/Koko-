@@ -28,65 +28,20 @@ import { collection, doc, getDocs, setDoc, deleteDoc, onSnapshot, query } from '
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 
 import { compressImage } from '../utils/imageUtils';
-
-interface Chapter {
-  id: string;
-  title: string;
-  content: string;
-  timestamp: string;
-}
-
-interface NPCComment {
-  id: string;
-  npcName: string;
-  npcAvatar: string;
-  npcRole: string;
-  npcBackground: string;
-  content: string;
-  timestamp: string;
-}
-
-interface Novel {
-  id: string;
-  storyName: string;
-  characterName: string;
-  genre: string;
-  chapterLength: number;
-  chapters: Chapter[];
-  coverImage: string;
-  editorBackgroundImage: string;
-  npcGlobalBackground: string;
-  lastModified: number;
-  settings: {
-    proxyEndpoint: string;
-    proxyKey: string;
-    model: string;
-    isSetupComplete: boolean;
-    useStreaming?: boolean;
-    extremeCapacityMode?: boolean;
-    maxTokens?: number;
-    timeout?: number;
-    fontSize?: number;
-    responseHistory?: number[];
-  };
-  userPlot?: string;
-  nextChapterLength?: number | '';
-  botCharInfo?: string;
-  userCharInfo?: string;
-  writingPrompt?: string;
-  npcCount?: number;
-  longTermMemory?: string;
-  characterMemory?: string;
-}
+import { getAllStories, saveStory, deleteStory as deleteStoryFromDB, clearAllStories } from '../utils/db';
+import { Novel, Chapter, NPCComment } from '../types';
+import { saveNovelToFirestore, loadChaptersFromFirestore, deleteNovelFromFirestore } from '../services/novelService';
 
 interface NovelScreenProps {
   onBack: () => void;
 }
 
+const DEFAULT_COVER = 'https://picsum.photos/seed/novel/1920/1080';
+
 const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   // Library State
   const [novels, setNovels] = useState<Novel[]>([]);
-  const [currentNovelId, setCurrentNovelId] = useState<string | null>(null);
+  const [currentNovelId, setCurrentNovelId] = useState<string | null>(() => localStorage.getItem('novel_current_id'));
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<FirebaseUser | null>(auth.currentUser);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -123,6 +78,14 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   
   // Current Novel State (Derived)
   const currentNovel = novels.find(n => n.id === currentNovelId);
+
+  useEffect(() => {
+    if (currentNovelId) {
+      localStorage.setItem('novel_current_id', currentNovelId);
+    } else {
+      localStorage.removeItem('novel_current_id');
+    }
+  }, [currentNovelId]);
 
   const [fontSize, setFontSize] = useState(currentNovel?.settings?.fontSize || 24);
   const [generatedTokens, setGeneratedTokens] = useState(0);
@@ -162,17 +125,34 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
   // Current Novel State (Derived) moved up to fix TDZ
 
-  // Persistence with Firebase
+  // Persistence with Firebase and IndexedDB
   useEffect(() => {
     let unsubscribe: () => void;
     let unsubBg: () => void;
+
+    const loadLocalData = async () => {
+      try {
+        const localNovels = await getAllStories();
+        if (localNovels.length > 0) {
+          console.log('NovelScreen: Loaded from IndexedDB:', localNovels);
+          setNovels(localNovels);
+          setLoading(false);
+        }
+      } catch (e) {
+        console.error('Failed to load from IndexedDB', e);
+      }
+    };
+
+    loadLocalData();
 
     const authUnsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setIsAuthLoading(false);
       if (!currentUser) {
         console.log('NovelScreen: No user.');
-        setNovels([]);
+        // Don't clear novels immediately if we have local data, 
+        // but maybe we should if we want strict multi-user separation.
+        // For now, let's keep them for offline use.
         setLoading(false);
         return;
       }
@@ -181,14 +161,46 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
       console.log('NovelScreen: Fetching novels for user:', userId);
       const q = query(collection(db, `users/${userId}/novels`));
       
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const novelsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Novel));
-        console.log('NovelScreen: Fetched novels:', novelsData);
-        setNovels(novelsData);
+      unsubscribe = onSnapshot(q, async (snapshot) => {
+        const novelsData = await Promise.all(snapshot.docs.map(async (doc) => {
+          const data = doc.data() as Omit<Novel, 'chapters'>;
+          const chapters = await loadChaptersFromFirestore(userId, doc.id);
+          return { id: doc.id, ...data, chapters } as Novel;
+        }));
+        
+        const localNovels = await getAllStories();
+        const mergedNovels = [...novelsData];
+        const firestoreNovelIds = new Set(novelsData.map(n => n.id));
+        
+        let needsUpload = false;
+        for (const localNovel of localNovels) {
+          if (!firestoreNovelIds.has(localNovel.id)) {
+            mergedNovels.push(localNovel);
+            needsUpload = true;
+          }
+        }
+        
+        mergedNovels.sort((a, b) => b.updatedAt - a.updatedAt);
+        setNovels(mergedNovels);
+        
+        // Sync IndexedDB cache: Update local with Firestore data
+        for (const novel of novelsData) {
+          await saveStory(novel);
+        }
+        
+        // Upload any local novels that were missing from Firestore
+        if (needsUpload && !snapshot.metadata.fromCache) {
+          for (const localNovel of localNovels) {
+            if (!firestoreNovelIds.has(localNovel.id)) {
+              await saveNovelToFirestore(userId, localNovel);
+            }
+          }
+        }
+        
         setLoading(false);
       }, (err) => {
         console.error('Failed to fetch novels from Firebase', err);
-        setError('Không thể tải dữ liệu từ máy chủ.');
+        setError('Không thể tải dữ liệu từ máy chủ. Đang sử dụng dữ liệu ngoại tuyến.');
         setLoading(false);
       });
 
@@ -209,26 +221,42 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
   const saveNovelToFirebase = async (novel: Novel) => {
     console.log('saveNovelToFirebase called, auth.currentUser:', auth.currentUser);
+    
+    // Always save to IndexedDB first for immediate persistence
+    try {
+      await saveStory(novel);
+    } catch (e) {
+      console.error('Failed to save to IndexedDB', e);
+    }
+
     if (!auth.currentUser) {
-      console.error('No user logged in, cannot save novel.');
+      console.log('No user logged in, saved to local storage only.');
       return;
     }
     const userId = auth.currentUser.uid;
     console.log('Saving to path:', `users/${userId}/novels/${novel.id}`);
+    
     try {
-      await setDoc(doc(db, `users/${userId}/novels`, novel.id), novel);
-      console.log('Novel saved successfully.');
+      await saveNovelToFirestore(userId, novel);
+      console.log('Novel saved successfully to Firebase.');
     } catch (e) {
       console.error('Failed to save novel to Firebase', e);
-      setError('Không thể lưu dữ liệu lên máy chủ.');
+      setError('Không thể lưu dữ liệu lên máy chủ. Đã lưu cục bộ.');
     }
   };
 
   const deleteNovelFromFirebase = async (id: string) => {
+    // Delete from IndexedDB
+    try {
+      await deleteStoryFromDB(id);
+    } catch (e) {
+      console.error('Failed to delete from IndexedDB', e);
+    }
+
     if (!auth.currentUser) return;
     const userId = auth.currentUser.uid;
     try {
-      await deleteDoc(doc(db, `users/${userId}/novels`, id));
+      await deleteNovelFromFirestore(userId, id);
     } catch (e) {
       console.error('Failed to delete novel from Firebase', e);
       setError('Không thể xóa dữ liệu trên máy chủ.');
@@ -282,7 +310,7 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   // Fetch Models
   const fetchModels = async () => {
     if (!currentNovel) return;
-    const { proxyEndpoint, proxyKey } = currentNovel.settings;
+    const { proxyEndpoint, proxyKey } = currentNovel.settings || {};
     if (!proxyEndpoint || !proxyKey) {
       setError('Vui lòng nhập đầy đủ Proxy Endpoint và API Key.');
       return;
@@ -385,6 +413,7 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   };
 
   const deleteNovel = (id: string) => {
+    setNovels(prev => prev.filter(n => n.id !== id));
     deleteNovelFromFirebase(id);
     if (currentNovelId === id) setCurrentNovelId(null);
     setDeleteConfirmId(null);
@@ -393,6 +422,10 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const updateCurrentNovel = (updates: Partial<Novel>) => {
     if (!currentNovelId || !currentNovel) return;
     const updatedNovel = { ...currentNovel, ...updates, lastModified: Date.now() };
+    
+    // Optimistic UI update
+    setNovels(prev => prev.map(n => n.id === currentNovelId ? updatedNovel : n));
+
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(() => {
       saveNovelToFirebase(updatedNovel);
@@ -406,6 +439,10 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
       settings: { ...currentNovel.settings, ...updates },
       lastModified: Date.now()
     };
+
+    // Optimistic UI update
+    setNovels(prev => prev.map(n => n.id === currentNovelId ? updatedNovel : n));
+
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(() => {
       saveNovelToFirebase(updatedNovel);
@@ -481,7 +518,7 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
   const proceedWithGeneration = async () => {
     if (!currentNovel) return;
-    const { proxyEndpoint, proxyKey, model, useStreaming = true, extremeCapacityMode = false, responseHistory = [] } = currentNovel.settings;
+    const { proxyEndpoint, proxyKey, model, useStreaming = true, extremeCapacityMode = false, responseHistory = [] } = currentNovel.settings || {};
     if (!proxyEndpoint || !proxyKey || !model) {
       setError('Vui lòng hoàn tất cài đặt API.');
       setShowSettings(true);
@@ -791,7 +828,7 @@ YÊU CẦU NỘI DUNG:
 
   const handleGenerateGossip = async () => {
     if (!currentNovel || !content.trim()) return;
-    const { proxyEndpoint, proxyKey, model } = currentNovel.settings;
+    const { proxyEndpoint, proxyKey, model } = currentNovel.settings || {};
     if (!proxyEndpoint || !proxyKey || !model) return;
 
     setIsGeneratingGossip(true);
@@ -920,41 +957,6 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
     );
   }
 
-  if (!user) {
-    return (
-      <div className="h-screen w-full bg-black flex items-center justify-center p-6">
-        <div className="bg-white/10 backdrop-blur-xl p-8 rounded-3xl border border-white/20 text-center space-y-6 max-w-sm w-full">
-          <div className="w-20 h-20 bg-[#F9C6D4] rounded-2xl mx-auto flex items-center justify-center shadow-lg">
-            <BookOpen size={40} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-serif font-bold text-white">Novel AI</h1>
-          <p className="text-white/60 text-sm">Đăng nhập để lưu trữ tiểu thuyết của bạn vĩnh viễn trên đám mây.</p>
-          <button 
-            onClick={handleLogin}
-            className="w-full py-4 bg-white text-black rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-gray-100 transition-all active:scale-95"
-          >
-            <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-            Tiếp tục với Google
-          </button>
-          <button onClick={onBack} className="text-white/40 text-sm hover:text-white transition-colors">Quay lại</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (isAuthLoading) return <div className="flex items-center justify-center h-full text-white">Đang tải...</div>;
-  if (!user) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-4 p-6 text-center">
-        <h2 className="text-2xl font-bold text-pink-500">Vui lòng đăng nhập</h2>
-        <p className="text-stone-400">Bạn cần đăng nhập bằng Google để lưu và quản lý tiểu thuyết của mình.</p>
-        <button onClick={handleLogin} className="bg-pink-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-pink-600 transition-all">
-          Đăng nhập với Google
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="h-full w-full overflow-hidden">
       <input 
@@ -1002,26 +1004,37 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                 </div>
               </div>
 
-              {!user ? (
-                <div className="flex flex-col items-center justify-center py-20 text-stone-400">
-                  <User size={80} className="mb-6 opacity-10" />
-                  <p className="text-xl font-medium mb-2">Bạn chưa đăng nhập</p>
-                  <p className="text-sm mb-6">Vui lòng đăng nhập để lưu trữ và đồng bộ tiểu thuyết của bạn.</p>
-                  <button 
-                    onClick={handleLogin}
-                    className="px-6 py-3 bg-[#DB2777] text-white rounded-xl font-bold hover:bg-[#BE185D] transition-all shadow-lg"
-                  >
-                    Đăng nhập bằng Google
-                  </button>
-                </div>
-              ) : novels.length === 0 ? (
+              {novels.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-stone-400">
                   <BookOpen size={80} className="mb-6 opacity-10" />
                   <p className="text-xl font-medium mb-2">Chưa có cuốn sổ nào</p>
                   <p className="text-sm">Hãy tạo cuốn sổ đầu tiên để bắt đầu hành trình sáng tác.</p>
+                  {!user && (
+                    <button 
+                      onClick={handleLogin}
+                      className="mt-6 px-6 py-3 bg-[#DB2777] text-white rounded-xl font-bold hover:bg-[#BE185D] transition-all shadow-lg"
+                    >
+                      Đăng nhập để đồng bộ đám mây
+                    </button>
+                  )}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
+                <>
+                  {!user && (
+                    <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between">
+                      <div className="flex items-center gap-3 text-amber-800">
+                        <User size={20} />
+                        <span className="text-sm font-medium">Bạn đang ở chế độ khách. Đăng nhập để bảo vệ dữ liệu trên đám mây.</span>
+                      </div>
+                      <button 
+                        onClick={handleLogin}
+                        className="px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition-all"
+                      >
+                        Đăng nhập ngay
+                      </button>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
                   {(novels || []).map((novel, idx) => (
                     <motion.div
                       key={novel.id}
@@ -1035,11 +1048,7 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                       }}
                       className="group relative h-[450px] rounded-[2.5rem] overflow-hidden shadow-2xl cursor-pointer bg-white border border-stone-100/50"
                     >
-                      {novel.coverImage ? (
-                        <div className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-110" style={{ backgroundImage: `url('${novel.coverImage}')` }} />
-                      ) : (
-                        <div className="absolute inset-0 bg-gradient-to-br from-[#FDF2F8] via-white to-[#FCE7F3]" />
-                      )}
+                      <div className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-110" style={{ backgroundImage: `url('${novel.coverImage || DEFAULT_COVER}')` }} />
                       
                       {/* Decorative Overlay */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
@@ -1083,9 +1092,10 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                     </motion.div>
                   ))}
                 </div>
-              )}
-            </div>
-          </motion.div>
+              </>
+            )}
+          </div>
+        </motion.div>
         ) : (
           <motion.div 
             key="editor"
@@ -1165,11 +1175,11 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                     <div className="space-y-6">
                       <div>
                         <label className="block text-xs font-semibold text-stone-500 uppercase mb-1 ml-1">API Endpoint</label>
-                        <input type="text" placeholder="https://api.example.com/v1" value={currentNovel.settings.proxyEndpoint} onChange={(e) => updateSettings({ proxyEndpoint: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none transition-all" />
+                        <input type="text" placeholder="https://api.example.com/v1" value={currentNovel?.settings?.proxyEndpoint || ''} onChange={(e) => updateSettings({ proxyEndpoint: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none transition-all" />
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-stone-500 uppercase mb-1 ml-1">API Key</label>
-                        <input type="password" placeholder="sk-..." value={currentNovel.settings.proxyKey} onChange={(e) => updateSettings({ proxyKey: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none transition-all" />
+                        <input type="password" placeholder="sk-..." value={currentNovel?.settings?.proxyKey || ''} onChange={(e) => updateSettings({ proxyKey: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none transition-all" />
                       </div>
                       <div className="space-y-4">
                         <div className="flex justify-between items-center">
@@ -1302,7 +1312,7 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                         </div>
                       </div>
                       <button onClick={() => {
-                        if (currentNovel.settings.proxyEndpoint && currentNovel.settings.proxyKey && currentNovel.settings.model) {
+                        if (currentNovel?.settings?.proxyEndpoint && currentNovel?.settings?.proxyKey && currentNovel?.settings?.model) {
                           updateSettings({ isSetupComplete: true });
                           setSuccessMessage('Đã lưu cấu hình!');
                         } else {

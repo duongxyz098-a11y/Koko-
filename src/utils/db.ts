@@ -4,8 +4,9 @@ const DB_NAME = 'banhnho_db';
 const STORE_NAME = 'bot_cards';
 const BG_STORE_NAME = 'backgrounds';
 const STORY_STORE_NAME = 'stories';
+const KIKOKO_STORY_STORE_NAME = 'kikoko_stories';
 const CHAT_STORE_NAME = 'chat_history';
-const VERSION = 4;
+const VERSION = 5;
 
 export async function getDB(): Promise<IDBPDatabase> {
   return openDB(DB_NAME, VERSION, {
@@ -18,6 +19,9 @@ export async function getDB(): Promise<IDBPDatabase> {
       }
       if (!db.objectStoreNames.contains(STORY_STORE_NAME)) {
         db.createObjectStore(STORY_STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(KIKOKO_STORY_STORE_NAME)) {
+        db.createObjectStore(KIKOKO_STORY_STORE_NAME);
       }
       if (!db.objectStoreNames.contains(CHAT_STORE_NAME)) {
         db.createObjectStore(CHAT_STORE_NAME);
@@ -111,4 +115,29 @@ export async function saveStory(story: any) {
 export async function deleteStory(id: string) {
   const db = await getDB();
   await db.delete(STORY_STORE_NAME, id);
+}
+
+export async function clearAllStories() {
+  const db = await getDB();
+  await db.clear(STORY_STORE_NAME);
+}
+
+export async function getAllKikokoStories(): Promise<any[]> {
+  const db = await getDB();
+  return await db.getAll(KIKOKO_STORY_STORE_NAME);
+}
+
+export async function saveKikokoStory(story: any) {
+  const db = await getDB();
+  await db.put(KIKOKO_STORY_STORE_NAME, story, story.id);
+}
+
+export async function deleteKikokoStory(id: string) {
+  const db = await getDB();
+  await db.delete(KIKOKO_STORY_STORE_NAME, id);
+}
+
+export async function clearAllKikokoStories() {
+  const db = await getDB();
+  await db.clear(KIKOKO_STORY_STORE_NAME);
 }

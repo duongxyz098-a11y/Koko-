@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from 'react';
 import { AnimatePresence } from 'motion/react';
-import { ErrorBoundary } from './components/ErrorBoundary';
+import ErrorBoundary from './components/ErrorBoundary';
 import LockScreen from './components/LockScreen';
 import PasscodeScreen from './components/PasscodeScreen';
 import HomeScreen from './components/HomeScreen';

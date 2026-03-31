@@ -81,6 +81,12 @@ export const sendMessage = async (
 
     const maxTokens = settings.isUnlimited ? 1000000 : (settings.maxTokens || 30000);
     const timeoutMs = (settings.timeoutMinutes || 5) * 60 * 1000;
+    console.log("Sending message with settings:", {
+      model: settings.model,
+      maxTokens: maxTokens,
+      timeoutMinutes: settings.timeoutMinutes,
+      timeoutMs: timeoutMs
+    });
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
