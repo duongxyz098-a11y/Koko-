@@ -168,7 +168,12 @@ export default function ApiSettings({
         setModel(modelsList[0].id || modelsList[0].name || '');
       }
     } catch (err: any) {
-      setError(err.message || 'Lỗi khi lấy danh sách model. Bạn có thể nhập tay tên model.');
+      console.error(err);
+      let errorMsg = err.message || 'Lỗi khi lấy danh sách model. Bạn có thể nhập tay tên model.';
+      if (errorMsg === 'Failed to fetch') {
+        errorMsg = 'Không thể kết nối với Proxy Endpoint. Vui lòng kiểm tra lại URL Proxy, kết nối mạng hoặc CORS settings.';
+      }
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }

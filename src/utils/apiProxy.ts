@@ -151,7 +151,11 @@ export const sendMessage = async (
       if (error.name === 'AbortError') {
         throw new Error(`Yêu cầu bị quá thời gian sau ${settings.timeoutMinutes || 5} phút. Vui lòng thử lại hoặc tăng thời gian chờ.`);
       }
-      throw error;
+      let errorMsg = error.message || 'Lỗi khi gọi API. Vui lòng thử lại.';
+      if (errorMsg === 'Failed to fetch') {
+        errorMsg = 'Không thể kết nối với Proxy Endpoint. Vui lòng kiểm tra lại URL Proxy, kết nối mạng hoặc CORS settings.';
+      }
+      throw new Error(errorMsg);
     }
   }
 };
@@ -240,7 +244,11 @@ export const sendMessageStream = async (
       if (error.name === 'AbortError') {
         throw new Error(`Yêu cầu bị quá thời gian sau ${settings.timeoutMinutes || 5} phút. Vui lòng thử lại hoặc tăng thời gian chờ.`);
       }
-      throw error;
+      let errorMsg = error.message || 'Lỗi khi gọi API. Vui lòng thử lại.';
+      if (errorMsg === 'Failed to fetch') {
+        errorMsg = 'Không thể kết nối với Proxy Endpoint. Vui lòng kiểm tra lại URL Proxy, kết nối mạng hoặc CORS settings.';
+      }
+      throw new Error(errorMsg);
     }
   }
 };

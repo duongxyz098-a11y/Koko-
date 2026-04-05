@@ -199,13 +199,17 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
         return content;
       }
 
-      } catch (error: any) {
+    } catch (error: any) {
       if (timeoutId) clearTimeout(timeoutId);
       console.error("API Call failed:", error);
       if (error.name === 'AbortError' || error === 'TIMEOUT') {
         throw new Error("Lỗi: Quá thời gian chờ API. Vui lòng tăng thời gian chờ trong Cài đặt.");
       }
-      throw error;
+      let errorMsg = error.message || 'Lỗi khi gọi API. Vui lòng thử lại.';
+      if (errorMsg === 'Failed to fetch') {
+        errorMsg = 'Không thể kết nối với Proxy Endpoint. Vui lòng kiểm tra lại URL Proxy, kết nối mạng hoặc CORS settings.';
+      }
+      throw new Error(errorMsg);
     }
   };
 

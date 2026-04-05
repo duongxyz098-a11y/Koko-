@@ -102,40 +102,67 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     const loadData = async () => {
       let loadedProfiles: Profile[] = [];
       const savedProfiles = await getFromDB('profiles', 'dating_profiles');
+      const savedNpcImages = await getFromDB('settings', 'dating_npc_images');
+      
+      if (savedNpcImages) setNpcUploadedImages(savedNpcImages);
+      else {
+        const localNpcImages = localStorage.getItem('dating_npc_images');
+        if (localNpcImages) {
+          try {
+            const parsed = JSON.parse(localNpcImages);
+            setNpcUploadedImages(parsed);
+          } catch (e) {
+            console.error('Failed to parse dating_npc_images from localStorage', e);
+          }
+        }
+      }
+
       if (savedProfiles) {
         loadedProfiles = savedProfiles;
         setProfiles(savedProfiles);
       } else {
-        // Migration logic
-        const oldPrefs = JSON.parse(localStorage.getItem('dating_user_prefs') || '{"age":[],"personality":[],"gender":[],"hobbies":[],"career":[]}');
-        const oldFollowed = JSON.parse(localStorage.getItem('dating_followed_npcs') || '[]');
-        const oldAvatar = localStorage.getItem('dating_avatar') || npcImageLinks[0];
-        const oldBg = localStorage.getItem('dating_bg') || '';
-        const oldProfileBg = localStorage.getItem('dating_profile_bg') || '';
-        const oldChatBg = localStorage.getItem('dating_chat_bg') || '';
+        const localProfilesStr = localStorage.getItem('dating_profiles');
+        if (localProfilesStr) {
+          try {
+            loadedProfiles = JSON.parse(localProfilesStr);
+            setProfiles(loadedProfiles);
+          } catch (e) {
+            console.error('Failed to parse dating_profiles from localStorage', e);
+          }
+        }
         
-        const initialProfile: Profile = {
-          id: 'default',
-          name: 'Người dùng mới',
-          avatar: oldAvatar,
-          preferences: oldPrefs,
-          npcPreferences: { age: [], personality: [], gender: [], hobbies: [], career: [] },
-          followedNpcs: oldFollowed,
-          chatMessages: {},
-          contacts: [],
-          userPosts: [],
-          appBackground: oldBg,
-          profileBackground: oldProfileBg,
-          chatBackground: oldChatBg,
-          avatarBg: '#F3B4C2',
-          npcCustomAvatars: {},
-          npcCustomBgs: {},
-          chatMode: 'online',
-          novelMinChars: 500,
-          novelMaxChars: 2000
-        };
-        loadedProfiles = [initialProfile];
-        setProfiles([initialProfile]);
+        if (loadedProfiles.length === 0) {
+          // Migration logic
+          const oldPrefs = JSON.parse(localStorage.getItem('dating_user_prefs') || '{"age":[],"personality":[],"gender":[],"hobbies":[],"career":[]}');
+          const oldFollowed = JSON.parse(localStorage.getItem('dating_followed_npcs') || '[]');
+          const oldAvatar = localStorage.getItem('dating_avatar') || npcImageLinks[0];
+          const oldBg = localStorage.getItem('dating_bg') || '';
+          const oldProfileBg = localStorage.getItem('dating_profile_bg') || '';
+          const oldChatBg = localStorage.getItem('dating_chat_bg') || '';
+          
+          const initialProfile: Profile = {
+            id: 'default',
+            name: 'Người dùng mới',
+            avatar: oldAvatar,
+            preferences: oldPrefs,
+            npcPreferences: { age: [], personality: [], gender: [], hobbies: [], career: [] },
+            followedNpcs: oldFollowed,
+            chatMessages: {},
+            contacts: [],
+            userPosts: [],
+            appBackground: oldBg,
+            profileBackground: oldProfileBg,
+            chatBackground: oldChatBg,
+            avatarBg: '#F3B4C2',
+            npcCustomAvatars: {},
+            npcCustomBgs: {},
+            chatMode: 'online',
+            novelMinChars: 500,
+            novelMaxChars: 2000
+          };
+          loadedProfiles = [initialProfile];
+          setProfiles([initialProfile]);
+        }
       }
 
       const savedCurrentProfileId = await getFromDB('settings', 'dating_current_profile_id');
@@ -182,20 +209,39 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     loadData();
   }, []);
 
+  const [isSaving, setIsSaving] = useState(false);
+  const [npcUploadedImages, setNpcUploadedImages] = useState<string[]>([]);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     if (!isLoaded) return;
-    const saveData = async () => {
-      await saveToDB('profiles', 'dating_profiles', profiles);
-      await saveToDB('settings', 'dating_current_profile_id', currentProfileId);
-      await saveToDB('settings', 'kotokoo_settings', { 
-        apiKey: userApiKey, 
-        endpoint: userApiUrl, 
-        model: userModelName,
-        isUnlimited: userIsUnlimited
-      });
+    
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    
+    setIsSaving(true);
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await saveToDB('profiles', 'dating_profiles', profiles);
+        await saveToDB('settings', 'dating_current_profile_id', currentProfileId);
+        await saveToDB('settings', 'dating_npc_images', npcUploadedImages);
+        await saveToDB('settings', 'kotokoo_settings', { 
+          apiKey: userApiKey, 
+          endpoint: userApiUrl, 
+          model: userModelName,
+          isUnlimited: userIsUnlimited
+        });
+        console.log('DatingScreen: Data saved to IndexedDB');
+      } catch (error) {
+        console.error('DatingScreen: Failed to save to IndexedDB', error);
+      } finally {
+        setIsSaving(false);
+      }
+    }, 1000);
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-    saveData();
-  }, [profiles, currentProfileId, userApiKey, userApiUrl, userModelName, userIsUnlimited, isLoaded]);
+  }, [profiles, currentProfileId, userApiKey, userApiUrl, userModelName, userIsUnlimited, npcUploadedImages, isLoaded]);
 
   const currentProfile = profiles.find(p => p.id === currentProfileId) || profiles[0] || {
     id: 'default',
@@ -302,14 +348,6 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const [npcUploadedImages, setNpcUploadedImages] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('dating_npc_images') || '[]');
-    } catch {
-      return [];
-    }
-  });
-  
   const profileBgInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const npcImageInputRef = useRef<HTMLInputElement>(null);
@@ -323,15 +361,6 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     setShowSplash(false);
   }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('dating_profiles', JSON.stringify(profiles));
-      localStorage.setItem('dating_current_profile_id', currentProfileId);
-    } catch (e) {
-      console.error('Failed to save dating profiles to localStorage:', e);
-    }
-  }, [profiles, currentProfileId]);
 
   // Sync current profile changes back to profiles array
   useEffect(() => {
@@ -662,7 +691,6 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         const result = reader.result as string;
         const newImages = [...npcUploadedImages, result];
         setNpcUploadedImages(newImages);
-        localStorage.setItem('dating_npc_images', JSON.stringify(newImages));
       };
       reader.readAsDataURL(file);
     }
@@ -1372,8 +1400,6 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
       userPosts: userPosts
     } : p);
     setProfiles(updatedProfiles);
-    localStorage.setItem('dating_profiles', JSON.stringify(updatedProfiles));
-    localStorage.setItem('dating_npc_images', JSON.stringify(npcUploadedImages));
     showToast('Đã lưu hồ sơ và toàn bộ dữ liệu thành công ♡');
     setTimeout(() => setIsSaved(false), 3000);
   };
@@ -1459,6 +1485,57 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
 
   const renderFeed = () => (
     <div className="p-4 pb-24">
+      {isSaving && (
+        <div className="flex items-center gap-2 mb-4 px-4 py-2 bg-pink-50 text-pink-700 rounded-full w-fit animate-pulse border border-pink-100 mx-auto">
+          <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce" />
+          <span className="text-[10px] font-bold uppercase tracking-widest italic">Đang lưu dữ liệu... ♡</span>
+        </div>
+      )}
+      {userPosts.map(post => (
+        <div key={post.id} className="bg-white/60 backdrop-blur-md mb-4 rounded-[15px] overflow-hidden shadow-sm border border-pink-100/50">
+          <div className="flex items-center p-3 justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full border-2 border-white shadow-sm overflow-hidden bg-pink-100">
+                <img src={userAvatar} className="w-full h-full object-cover" referrerPolicy="no-referrer" alt="User" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-gray-800">{currentProfile.name}</h4>
+                <p className="text-[10px] text-gray-400">{new Date(post.createdAt).toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+          <div className="px-4 py-2 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+            {post.content}
+          </div>
+          {post.image && (
+            <div className="px-4 pb-4">
+              <img src={post.image} className="w-full rounded-xl shadow-sm" referrerPolicy="no-referrer" alt="Post" />
+            </div>
+          )}
+          <div className="px-4 py-3 border-t border-pink-50 flex items-center justify-between text-xs text-gray-400">
+            <div className="flex items-center gap-4">
+              <button className="flex items-center gap-1 hover:text-pink-500 transition-colors" onClick={() => handleHeartUserPost(post.id)}>
+                <Heart size={16} className="text-pink-400" /> {post.comments.length > 0 ? post.comments.length : 'Thả tim'}
+              </button>
+              <button className="flex items-center gap-1 hover:text-pink-500 transition-colors">
+                <MessageCircle size={16} /> {post.comments.length}
+              </button>
+            </div>
+          </div>
+          {post.comments.length > 0 && (
+            <div className="px-4 pb-4 space-y-2">
+              {post.comments.slice(0, 3).map((comment, idx) => (
+                <div key={idx} className="text-[11px] bg-pink-50/50 p-2 rounded-lg">
+                  <span className="font-bold text-pink-600">{comment.authorName}:</span> {comment.content}
+                </div>
+              ))}
+              {post.comments.length > 3 && (
+                <p className="text-[10px] text-pink-400 italic text-center">Xem thêm {post.comments.length - 3} bình luận khác...</p>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
       {npcPosts.map(post => {
         const customAvatar = npcCustomAvatars[post.id || post.name];
         const customBg = npcCustomBgs[post.id || post.name];

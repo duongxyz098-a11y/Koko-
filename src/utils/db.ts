@@ -127,6 +127,11 @@ export async function getAllKikokoStories(): Promise<any[]> {
   return await db.getAll(KIKOKO_STORY_STORE_NAME);
 }
 
+export async function getKikokoStory(id: string): Promise<any> {
+  const db = await getDB();
+  return await db.get(KIKOKO_STORY_STORE_NAME, id);
+}
+
 export async function saveKikokoStory(story: any) {
   const db = await getDB();
   await db.put(KIKOKO_STORY_STORE_NAME, story, story.id);

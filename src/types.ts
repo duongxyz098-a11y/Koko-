@@ -43,6 +43,7 @@ export interface Novel {
   botCharInfo?: string;
   userCharInfo?: string;
   writingPrompt?: string;
+  selectedStyles?: string[];
   npcCount?: number;
   longTermMemory?: string;
   characterMemory?: string;

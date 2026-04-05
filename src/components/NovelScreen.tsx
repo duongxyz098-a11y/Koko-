@@ -23,14 +23,13 @@ import {
   Book,
   Bot
 } from 'lucide-react';
-import { db, auth } from '../firebase';
-import { collection, doc, getDocs, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
+import { auth } from '../firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 
 import { compressImage } from '../utils/imageUtils';
 import { getAllStories, saveStory, deleteStory as deleteStoryFromDB, clearAllStories } from '../utils/db';
 import { Novel, Chapter, NPCComment } from '../types';
-import { saveNovelToFirestore, loadChaptersFromFirestore, deleteNovelFromFirestore } from '../services/novelService';
+import { WRITING_STYLES } from '../constants/writingStyles';
 
 interface NovelScreenProps {
   onBack: () => void;
@@ -61,6 +60,14 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showDrawer, setShowDrawer] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  
+  // Streaming Refs
+  const fullTextRef = useRef('');
+  const displayedTextRef = useRef('');
+  const isApiDoneRef = useRef(false);
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const displayIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
   const [galleryBackground, setGalleryBackground] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -127,19 +134,19 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
   // Persistence with Firebase and IndexedDB
   useEffect(() => {
-    let unsubscribe: () => void;
-    let unsubBg: () => void;
-
     const loadLocalData = async () => {
       try {
         const localNovels = await getAllStories();
         if (localNovels.length > 0) {
           console.log('NovelScreen: Loaded from IndexedDB:', localNovels);
+          // Sort by lastModified descending
+          localNovels.sort((a, b) => b.lastModified - a.lastModified);
           setNovels(localNovels);
-          setLoading(false);
         }
+        setLoading(false);
       } catch (e) {
         console.error('Failed to load from IndexedDB', e);
+        setLoading(false);
       }
     };
 
@@ -148,74 +155,10 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
     const authUnsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setIsAuthLoading(false);
-      if (!currentUser) {
-        console.log('NovelScreen: No user.');
-        // Don't clear novels immediately if we have local data, 
-        // but maybe we should if we want strict multi-user separation.
-        // For now, let's keep them for offline use.
-        setLoading(false);
-        return;
-      }
-
-      const userId = currentUser.uid;
-      console.log('NovelScreen: Fetching novels for user:', userId);
-      const q = query(collection(db, `users/${userId}/novels`));
-      
-      unsubscribe = onSnapshot(q, async (snapshot) => {
-        const novelsData = await Promise.all(snapshot.docs.map(async (doc) => {
-          const data = doc.data() as Omit<Novel, 'chapters'>;
-          const chapters = await loadChaptersFromFirestore(userId, doc.id);
-          return { id: doc.id, ...data, chapters } as Novel;
-        }));
-        
-        const localNovels = await getAllStories();
-        const mergedNovels = [...novelsData];
-        const firestoreNovelIds = new Set(novelsData.map(n => n.id));
-        
-        let needsUpload = false;
-        for (const localNovel of localNovels) {
-          if (!firestoreNovelIds.has(localNovel.id)) {
-            mergedNovels.push(localNovel);
-            needsUpload = true;
-          }
-        }
-        
-        mergedNovels.sort((a, b) => b.updatedAt - a.updatedAt);
-        setNovels(mergedNovels);
-        
-        // Sync IndexedDB cache: Update local with Firestore data
-        for (const novel of novelsData) {
-          await saveStory(novel);
-        }
-        
-        // Upload any local novels that were missing from Firestore
-        if (needsUpload && !snapshot.metadata.fromCache) {
-          for (const localNovel of localNovels) {
-            if (!firestoreNovelIds.has(localNovel.id)) {
-              await saveNovelToFirestore(userId, localNovel);
-            }
-          }
-        }
-        
-        setLoading(false);
-      }, (err) => {
-        console.error('Failed to fetch novels from Firebase', err);
-        setError('Không thể tải dữ liệu từ máy chủ. Đang sử dụng dữ liệu ngoại tuyến.');
-        setLoading(false);
-      });
-
-      // Load gallery background
-      unsubBg = onSnapshot(doc(db, `users/${userId}/settings`, 'gallery'), (doc) => {
-        if (doc.exists()) {
-          setGalleryBackground(doc.data().background);
-        }
-      });
     });
 
     return () => {
       authUnsubscribe();
-      if (unsubscribe) unsubscribe();
-      if (unsubBg) unsubBg();
     };
   }, []);
 
@@ -228,21 +171,14 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
     } catch (e) {
       console.error('Failed to save to IndexedDB', e);
     }
+  };
 
-    if (!auth.currentUser) {
-      console.log('No user logged in, saved to local storage only.');
-      return;
-    }
-    const userId = auth.currentUser.uid;
-    console.log('Saving to path:', `users/${userId}/novels/${novel.id}`);
-    
-    try {
-      await saveNovelToFirestore(userId, novel);
-      console.log('Novel saved successfully to Firebase.');
-    } catch (e) {
-      console.error('Failed to save novel to Firebase', e);
-      setError('Không thể lưu dữ liệu lên máy chủ. Đã lưu cục bộ.');
-    }
+  const saveChapterToFirebase = async (novelId: string, chapter: Chapter) => {
+    // No longer saving to Firebase
+  };
+
+  const deleteChapterFromFirebase = async (novelId: string, chapterId: string) => {
+    // No longer deleting from Firebase
   };
 
   const deleteNovelFromFirebase = async (id: string) => {
@@ -251,15 +187,6 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
       await deleteStoryFromDB(id);
     } catch (e) {
       console.error('Failed to delete from IndexedDB', e);
-    }
-
-    if (!auth.currentUser) return;
-    const userId = auth.currentUser.uid;
-    try {
-      await deleteNovelFromFirestore(userId, id);
-    } catch (e) {
-      console.error('Failed to delete novel from Firebase', e);
-      setError('Không thể xóa dữ liệu trên máy chủ.');
     }
   };
 
@@ -297,12 +224,15 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
     }
   }, [currentNovelId]);
 
-  // Persist plot and length changes immediately
+  // Persist plot and length changes with debounce
   useEffect(() => {
     if (currentNovelId) {
       const novel = novels.find(n => n.id === currentNovelId);
       if (novel && (novel.userPlot !== userPlot || novel.nextChapterLength !== nextChapterLength)) {
-        updateCurrentNovel({ userPlot, nextChapterLength });
+        const timer = setTimeout(() => {
+          updateCurrentNovel({ userPlot, nextChapterLength });
+        }, 1000);
+        return () => clearTimeout(timer);
       }
     }
   }, [userPlot, nextChapterLength, currentNovelId]);
@@ -467,9 +397,6 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
         else if (uploadType === 'npcBg') updateCurrentNovel({ npcGlobalBackground: compressed });
         else if (uploadType === 'galleryBackground') {
           setGalleryBackground(compressed);
-          if (auth.currentUser) {
-            setDoc(doc(db, `users/${auth.currentUser.uid}/settings`, 'gallery'), { background: compressed });
-          }
         }
       } catch (err) {
         console.error("Image upload failed", err);
@@ -516,6 +443,8 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
     proceedWithGeneration();
   };
 
+  const [countdownTime, setCountdownTime] = useState<number | null>(null);
+
   const proceedWithGeneration = async () => {
     if (!currentNovel) return;
     const { proxyEndpoint, proxyKey, model, useStreaming = true, extremeCapacityMode = false, responseHistory = [] } = currentNovel.settings || {};
@@ -528,73 +457,152 @@ const NovelScreen: React.FC<NovelScreenProps> = ({ onBack }) => {
 
     setIsGenerating(true);
     setError(null);
+    setContent('');
     setStreamingContent('');
+    fullTextRef.current = '';
+    displayedTextRef.current = '';
+    isApiDoneRef.current = false;
     setGeneratedTokens(0);
     setRequestedTokens(currentNovel.settings.maxTokens || 32000);
-    
-    // HỆ THỐNG THỜI GIAN THÔNG MINH (Adaptive Timeout)
-    // Tính toán thời gian dựa trên lịch sử và độ phức tạp
-    const baseComplexity = (nextChapterLength || currentNovel.chapterLength || 1000) / 100; // 100 chữ ~ 1 đơn vị phức tạp
-    const avgResponseTime = responseHistory.length > 0 
-      ? responseHistory.reduce((a, b) => a + b, 0) / responseHistory.length 
-      : 30; // Mặc định 30s cho 1000 chữ
-    
-    const calculatedTimeout = Math.min(
-      extremeCapacityMode ? 60 * 60 * 1000 : 30 * 60 * 1000, // Max limit
-      Math.max(2 * 60 * 1000, (avgResponseTime * baseComplexity * 2) * 1000) // Min 2p, hoặc gấp đôi trung bình
-    );
-    
-    setEstimatedTime(Math.ceil(calculatedTimeout / 60000));
+    setActiveTab('editor');
+    setEditingChapterId(null);
 
-    const startTime = Date.now();
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    if (displayIntervalRef.current) clearInterval(displayIntervalRef.current);
+
+    const userTimeoutMinutes = currentNovel.settings.timeout || 15;
+    const userTimeoutMs = userTimeoutMinutes * 60 * 1000;
+    let remainingTimeMs = userTimeoutMs;
+    
+    setEstimatedTime(userTimeoutMinutes);
+    setCountdownTime(userTimeoutMinutes * 60);
+
+    let timerStarted = false;
+
+    const startTimers = () => {
+      if (timerStarted) return;
+      timerStarted = true;
+      
+      const startTime = Date.now();
+      
+      countdownIntervalRef.current = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const remaining = Math.max(0, userTimeoutMs - elapsed);
+        setCountdownTime(Math.ceil(remaining / 1000));
+        remainingTimeMs = remaining;
+        
+        if (remaining <= 0) {
+          clearInterval(countdownIntervalRef.current!);
+          clearInterval(displayIntervalRef.current!);
+          setIsGenerating(false);
+          if (fullTextRef.current) {
+            setContent(fullTextRef.current);
+            setStreamingContent('');
+          }
+          if (novelAbortControllerRef.current) {
+            novelAbortControllerRef.current.abort('TIMEOUT');
+          }
+        }
+      }, 1000);
+
+      displayIntervalRef.current = setInterval(() => {
+        const remainingChars = fullTextRef.current.length - displayedTextRef.current.length;
+        
+        if (isApiDoneRef.current) {
+          if (remainingChars > 0) {
+            const charsToAdd = Math.max(5, Math.ceil(remainingChars / (remainingTimeMs / 50)));
+            displayedTextRef.current += fullTextRef.current.slice(displayedTextRef.current.length, displayedTextRef.current.length + charsToAdd);
+            setStreamingContent(displayedTextRef.current);
+          } else {
+            clearInterval(countdownIntervalRef.current!);
+            clearInterval(displayIntervalRef.current!);
+            setIsGenerating(false);
+            setContent(fullTextRef.current);
+            setStreamingContent('');
+            setCountdownTime(null);
+          }
+        } else {
+          if (remainingChars > 0) {
+             const charsToAdd = Math.max(1, Math.ceil(remainingChars / 10)); 
+             displayedTextRef.current += fullTextRef.current.slice(displayedTextRef.current.length, displayedTextRef.current.length + charsToAdd);
+             setStreamingContent(displayedTextRef.current);
+          }
+        }
+        setGeneratedTokens(Math.floor(displayedTextRef.current.length / 4));
+      }, 50);
+    };
+
     novelAbortControllerRef.current = new AbortController();
-    const timeoutId = setTimeout(() => {
-      if (novelAbortControllerRef.current) {
-        novelAbortControllerRef.current.abort('TIMEOUT');
-      }
-    }, calculatedTimeout);
 
     try {
-      // Lấy bối cảnh rộng hơn từ các chương trước (tối đa 5 chương gần nhất)
-      const context = currentNovel.chapters.slice(-5).map(ch => 
-        `Chương ${ch.title}: ${(ch.content || '').substring(0, 500)}...`
-      ).join('\n\n');
+      // Lấy bối cảnh từ các chương trước để đảm bảo mạch truyện
+      const contextCharLimit = extremeCapacityMode ? 170000 : 40000;
+      let context = '';
+      let currentLength = 0;
+      
+      // Lấy từ chương mới nhất ngược về trước
+      for (let i = currentNovel.chapters.length - 1; i >= 0; i--) {
+        const ch = currentNovel.chapters[i];
+        const chText = `--- Chương ${ch.title} ---\n${ch.content || ''}\n\n`;
+        if (currentLength + chText.length > contextCharLimit) {
+          if (currentLength === 0) {
+            context = `--- Chương ${ch.title} ---\n${(ch.content || '').slice(-contextCharLimit)}\n\n`;
+          }
+          break;
+        }
+        context = chText + context;
+        currentLength += chText.length;
+      }
+      
+      const finalContext = `[TÓM TẮT DIỄN BIẾN TRƯỚC ĐÓ]\n${currentNovel.longTermMemory || 'Chưa có tóm tắt.'}\n\n[NỘI DUNG CHI TIẾT CÁC CHƯƠNG TRƯỚC ĐỂ NỐI TIẾP]\n${context}`;
 
-      const systemInstruction = `Bạn là một nhà văn chuyên nghiệp tài ba, có khả năng viết lách xuất sắc và tư duy cốt truyện logic.
+      const selectedStylesText = currentNovel.selectedStyles && currentNovel.selectedStyles.length > 0 
+        ? currentNovel.selectedStyles.map(id => WRITING_STYLES.find(s => s.id === id)?.content).filter(Boolean).join('\n\n')
+        : '';
+        
+      const writingStylePrompt = [currentNovel.writingPrompt, selectedStylesText].filter(Boolean).join('\n\n');
+
+      const systemInstruction = `Bạn là một nhà văn chuyên nghiệp tài ba, có khả năng viết lách xuất sắc và tư duy cốt truyện logic. BẠN PHẢI GHI NHỚ TOÀN BỘ nội dung, tình tiết, sự kiện và nhân vật từ các chương trước. Đảm bảo sự liên kết chặt chẽ, logic và nhất quán. TUYỆT ĐỐI TRÁNH LỖI LOGIC: Các nhân vật đã quen biết nhau từ trước KHÔNG ĐƯỢC hành xử như mới gặp. Phải giữ đúng bối cảnh hiện tại, mục tiêu đang thực hiện và những gì đang bàn luận.
 QUY TẮC BẮT BUỘC:
 1. TUYỆT ĐỐI KHÔNG bao giờ nhắc đến việc mình là AI, hệ thống, hay bất kỳ thông tin kỹ thuật nào. Bạn CHỈ là một nhà văn.
-2. KHÔNG ĐƯỢC viết ngắt quãng. Phải hoàn thành toàn bộ chương truyện trong một lần trả lời duy nhất.
+2. KHÔNG CẦN KẾT THÚC CHƯƠNG. Hãy viết càng dài càng tốt, miêu tả cực kỳ chi tiết. Nếu hết dung lượng, cứ để câu chuyện dang dở, tuyệt đối không được tóm tắt để kết thúc sớm.
 3. KHÔNG ĐƯỢC tự ý cắt câu hay kết thúc lửng lơ khi chưa đạt đủ dung lượng yêu cầu.
-4. PHẢI ghi nhớ và liên kết chặt chẽ với các chương trước. Phát triển cốt truyện tiếp nối, không nhắc lại những gì đã xảy ra một cách thừa thãi.
+4. BẮT BUỘC LIÊN KẾT MẠCH TRUYỆN: Chương sau PHẢI tiếp nối logic, cảm xúc và sự kiện của các chương trước. KHÔNG ĐƯỢC viết như một nội dung hoàn toàn mới. Đảm bảo tính nhất quán (consistency): nhân vật không thay đổi tính cách đột ngột, diễn biến hợp lý theo timeline, tuyệt đối không "quên" các tình tiết đã xảy ra. Đặc biệt chú ý đến mối quan hệ giữa các nhân vật và bối cảnh không gian, thời gian hiện tại.
 5. Văn phong phải mượt mà, giàu hình ảnh, cảm xúc và phù hợp với thể loại truyện.
 6. NẾU TÁC GIẢ CÓ YÊU CẦU CỐT TRUYỆN (PLOT), BẠN PHẢI TUÂN THỦ TUYỆT ĐỐI VÀ LẤY ĐÓ LÀM XƯƠNG SỐNG CHO CHƯƠNG NÀY.
 7. THÔNG TIN NHÂN VẬT:
    - Bot Character: ${currentNovel.botCharInfo || 'Chưa xác định'}
    - User Character: ${currentNovel.userCharInfo || 'Chưa xác định'}
+   (LƯU Ý: Thông tin nhân vật chỉ để bạn hiểu cách họ hành xử. TUYỆT ĐỐI KHÔNG nhắc đi nhắc lại ngoại hình, trang điểm, hay gia cảnh của họ trong truyện. Các nhân vật khác KHÔNG THỂ tự dưng biết bí mật/gia cảnh của người khác nếu chưa được tiết lộ.)
 8. BỘ NHỚ DÀI HẠN (Cốt truyện & Bối cảnh): ${currentNovel.longTermMemory || 'Chưa có dữ liệu'}
 9. BỘ NHỚ NHÂN VẬT (Thông tin các nhân vật phụ/chính/NPC): ${currentNovel.characterMemory || 'Chưa có dữ liệu'}
-10. PHONG CÁCH VIẾT: ${currentNovel.writingPrompt || 'Tự nhiên, lôi cuốn'}
+10. PHONG CÁCH VIẾT: ${writingStylePrompt || 'Tự nhiên, lôi cuốn'}
 11. QUY TẮC TRÌNH BÀY: Mỗi dòng văn bản (line) PHẢI có độ dài từ 10 đến 14 chữ/từ trước khi xuống dòng. Hãy ngắt dòng một cách thủ công (manual line breaks) để đảm bảo mỗi dòng đều có độ dài này. Đây là yêu cầu BẮT BUỘC về định dạng.`;
 
-      const userPrompt = `Hãy viết chương tiếp theo cho tiểu thuyết "${currentNovel.storyName}".
-THÔNG TIN TRUYỆN:
-- Thể loại: ${currentNovel.genre}
-- Nhân vật chính: ${currentNovel.characterName}
-- Độ dài yêu cầu: Khoảng ${nextChapterLength || currentNovel.chapterLength} chữ/từ.
+      // Tính toán số lượng token mục tiêu dựa trên thời gian (5 phút = 12000 token => 1 phút = 2400 token)
+      const targetTokens = userTimeoutMinutes * 2400;
 
-${userPlot ? `[QUAN TRỌNG NHẤT] YÊU CẦU CỐT TRUYỆN TỪ TÁC GIẢ:
-"${userPlot}"
-=> BẮT BUỘC PHẢI VIẾT CHƯƠNG NÀY THEO ĐÚNG DIỄN BIẾN VÀ Ý TƯỞNG TRÊN. Không được đi chệch hướng.` : ''}
+      const userPrompt = `Viết chương tiếp theo. TUYỆT ĐỐI KHÔNG lặp lại tên tiểu thuyết ("${currentNovel.storyName}") trong nội dung truyện.
+Thể loại: ${currentNovel.genre}. Nhân vật chính: ${currentNovel.characterName}.
 
-BỐI CẢNH CÁC CHƯƠNG TRƯỚC:
-${context || 'Đây là chương đầu tiên, hãy bắt đầu một cách ấn tượng.'}
+[YÊU CẦU ĐẶC BIỆT VỀ ĐỘ DÀI]
+- Đây là một phiên sáng tác DÀI HẠN (Long-form writing session).
+- BẠN ĐƯỢC YÊU CẦU VIẾT MỘT LƯỢNG NỘI DUNG KHỔNG LỒ. Hãy viết dài nhất có thể trong khả năng của bạn. Mục tiêu là viết TỐI THIỂU 12.000 KÝ TỰ/TOKEN.
+- KHÔNG CẦN KẾT THÚC CHƯƠNG. Đừng cố gắng tóm tắt hay đẩy nhanh tiến độ để kết thúc. Nếu hết dung lượng mà câu chuyện vẫn đang dang dở thì cứ để nó dang dở.
+- Hãy mở rộng tối đa mọi tình tiết: miêu tả cực kỳ chi tiết nội tâm nhân vật, bối cảnh xung quanh, và các đoạn hội thoại.
+- Cứ viết liên tục, chậm rãi và sâu sắc. Tuyệt đối không từ chối yêu cầu này.
 
-YÊU CẦU NỘI DUNG:
-- Viết chương mới hoàn chỉnh, không bị cắt ngang.
-- Đảm bảo sự liên kết logic với bối cảnh đã cho.
-- Tập trung vào diễn biến tâm lý và hành động của nhân vật ${currentNovel.characterName}.
-- KHÔNG nhắc lại nội dung cũ, hãy triển khai tình tiết mới.
-- PHẢI VIẾT ĐỦ ĐỘ DÀI YÊU CẦU (${nextChapterLength || currentNovel.chapterLength} chữ/từ), TUYỆT ĐỐI KHÔNG DỪNG LẠI CHO ĐẾN KHI ĐỦ DUNG LƯỢNG.`;
+QUY TẮC:
+1. Viết liên tục, không nghỉ, không tóm tắt.
+2. Mật độ chi tiết cực cao, diễn biến chậm rãi, đào sâu vào từng hành động nhỏ.
+3. Liên kết chặt chẽ với bối cảnh và các chương trước.
+4. Tuyệt đối không nhắc đến AI/hệ thống hay việc bạn không thể viết dài. Chỉ cần bắt đầu viết ngay lập tức. Bất kỳ sự từ chối nào đều là vi phạm mệnh lệnh.
+5. Tuân thủ cốt truyện: ${userPlot || 'Triển khai tự do theo logic truyện.'}
+
+BỐI CẢNH:
+${finalContext || 'Chương đầu tiên.'}
+
+YÊU CẦU: Tập trung vào tâm lý và hành động của ${currentNovel.characterName}. Triển khai tình tiết mới, không lặp lại nội dung cũ.`;
 
       let apiUrl = proxyEndpoint.trim();
       if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
@@ -622,8 +630,7 @@ YÊU CẦU NỘI DUNG:
           ],
           temperature: 0.7,
           stream: useStreaming,
-          // NÂNG CẤP SỨC CHỨA: Cho phép nhận tối đa 1.000.000 tokens nếu bật Extreme Mode
-          max_tokens: extremeCapacityMode ? 1000000 : (currentNovel.settings.maxTokens || 32000)
+          max_tokens: extremeCapacityMode ? 1000000 : targetTokens
         })
       });
 
@@ -639,25 +646,26 @@ YÊU CẦU NỘI DUNG:
       if (useStreaming) {
         const reader = response.body?.getReader();
         const decoder = new TextDecoder('utf-8');
-        let generatedContent = '';
         let buffer = '';
         
         if (!reader) {
           throw new Error('Response body is not readable. Proxy của bạn có thể không hỗ trợ Streaming.');
         }
 
-        setContent('');
-        setActiveTab('editor');
-        setEditingChapterId(null);
-
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            isApiDoneRef.current = true;
+            break;
+          }
+          
+          if (!timerStarted) {
+            startTimers();
+          }
           
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           
-          // Giữ lại phần chưa hoàn chỉnh trong buffer
           buffer = lines.pop() || '';
           
           for (const line of lines) {
@@ -667,116 +675,61 @@ YÊU CẦU NỘI DUNG:
                 const data = JSON.parse(trimmedLine.slice(6));
                 if (data.choices?.[0]?.delta?.content) {
                   const delta = data.choices[0].delta.content;
-                  generatedContent += delta;
-                  setStreamingContent(generatedContent);
-                  setContent(generatedContent);
-                  // Ước tính token: 1 token ~ 4 ký tự
-                  setGeneratedTokens(Math.floor(generatedContent.length / 4));
+                  fullTextRef.current += delta;
                 }
               } catch (e) {
-                // Bỏ qua lỗi parse JSON vì có thể chunk bị cắt ngang
+                // Ignore parse error
               }
             }
           }
         }
         
-        if (!generatedContent.trim()) {
-           throw new Error('Streaming hoàn tất nhưng không nhận được nội dung. Hãy thử tắt chế độ Streaming trong Cài đặt.');
+        isApiDoneRef.current = true;
+        
+        if (!fullTextRef.current.trim()) {
+           throw new Error('API trả về dữ liệu rỗng. Hãy thử lại hoặc đổi Model.');
         }
+
       } else {
-        // NÂNG CẤP SỨC CHỨA: Đọc dữ liệu thô (raw text) theo từng chunk để tránh tràn bộ nhớ RAM 
-        // của trình duyệt khi nhận cục JSON khổng lồ (thay vì dùng response.json() trực tiếp)
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let rawJsonText = '';
-
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            rawJsonText += decoder.decode(value, { stream: true });
-          }
-        } else {
-          rawJsonText = await response.text();
-        }
-
-        let data;
-        try {
-          data = JSON.parse(rawJsonText);
-        } catch (parseError) {
-          console.error("JSON Parse Error:", parseError);
-          console.log("Raw Text:", rawJsonText.substring(0, 1000) + "...");
-          throw new Error('Hệ thống đã tải xong khối dữ liệu khổng lồ nhưng định dạng trả về bị hỏng (Invalid JSON). Dữ liệu quá lớn có thể đã bị cắt ngang giữa chừng.');
+        // Non-streaming mode
+        const data = await response.json();
+        
+        if (!timerStarted) {
+          startTimers();
         }
         
-        if (data.error) {
-          throw new Error(data.error.message || 'API Error');
+        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+          throw new Error('API trả về dữ liệu rỗng hoặc không hợp lệ.');
         }
         
-        const finalContent = data.choices?.[0]?.message?.content || '';
-        setContent(finalContent);
-        setGeneratedTokens(Math.floor(finalContent.length / 4));
-        
-        // Handle different API response formats (Chat vs Completions vs Gemini vs Anthropic)
-        let generatedContent = '';
-        if (data.choices?.[0]?.message?.content !== undefined) {
-          generatedContent = data.choices[0].message.content;
-        } else if (data.choices?.[0]?.text !== undefined) {
-          generatedContent = data.choices[0].text;
-        } else if (data.candidates?.[0]?.content?.parts?.[0]?.text !== undefined) {
-          generatedContent = data.candidates[0].content.parts[0].text; // Gemini
-        } else if (Array.isArray(data.content) && data.content[0]?.text !== undefined) {
-          generatedContent = data.content[0].text; // Anthropic
-        } else if (typeof data.content === 'string') {
-          generatedContent = data.content;
-        } else if (data.response !== undefined) {
-          generatedContent = data.response; // Ollama generate endpoint
-        } else if (data.message?.content !== undefined) {
-          generatedContent = data.message.content; // Some custom proxies
-        } else if (data.text !== undefined) {
-          generatedContent = data.text; // Other custom proxies
+        let generatedContent = data.choices[0].message.content;
+        if (!generatedContent) {
+           throw new Error('API trả về dữ liệu rỗng.');
         }
         
-        if (!generatedContent || !generatedContent.trim()) {
-          console.error('Full API Response:', data);
-          
-          // NÂNG CẤP: Bỏ thông báo đổ lỗi cho Proxy, hiển thị thông báo trung lập hơn
-          if (data.usage?.completion_tokens > 0 && generatedContent === "") {
-            setError(`Hệ thống App đã nâng cấp sức chứa và nhận thành công toàn bộ gói dữ liệu từ API. Tuy nhiên, gói dữ liệu trả về báo cáo có ${data.usage.completion_tokens} tokens nhưng phần nội dung văn bản (content) lại hoàn toàn trống rỗng. Dưới đây là dữ liệu gốc (Raw Context) để bạn kiểm tra.`);
-          } else {
-            setError('Đã hiển thị dữ liệu gốc (Raw Context) vì không nhận diện được định dạng trả về của Model.');
-          }
-
-          // FORCE DISPLAY RAW CONTEXT
-          generatedContent = `[HỆ THỐNG ĐÃ NÂNG CẤP SỨC CHỨA - DỮ LIỆU GỐC TỪ API]\n\n${JSON.stringify(data, null, 2)}`;
-        }
-        
-        setContent(generatedContent);
-        setEditingChapterId(null);
-        setActiveTab('editor');
+        fullTextRef.current = generatedContent;
+        isApiDoneRef.current = true;
       }
 
-      // Ghi nhớ thời gian phản hồi để tự điều chỉnh cho lần sau
-      const endTime = Date.now();
-      const duration = (endTime - startTime) / 1000; // seconds
-      const complexity = (nextChapterLength || currentNovel.chapterLength || 1000) / 100;
-      const timePerUnit = duration / complexity;
-      
-      const newHistory = [...(currentNovel.settings.responseHistory || []), timePerUnit].slice(-10);
-      updateSettings({ responseHistory: newHistory });
-
-      // Không reset plot và độ dài để người dùng có thể chỉnh sửa lại nếu cần
     } catch (err: any) {
       if (err.name === 'AbortError' || err === 'TIMEOUT') {
-        setError(err === 'TIMEOUT' ? 'Đã quá 15 phút chờ đợi. Kết nối bị ngắt để tránh treo máy.' : 'Đã hủy quá trình sáng tác.');
+        // If aborted by user, we stop everything
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+        if (displayIntervalRef.current) clearInterval(displayIntervalRef.current);
+        setIsGenerating(false);
+        setContent(fullTextRef.current);
+        setStreamingContent('');
       } else {
         console.error(err);
-        setError(err.message || 'Lỗi khi tạo nội dung. Vui lòng thử lại.');
+        let errorMsg = err.message || 'Lỗi khi tạo nội dung. Vui lòng thử lại.';
+        if (errorMsg === 'Failed to fetch') {
+          errorMsg = 'Không thể kết nối với Proxy Endpoint. Vui lòng kiểm tra lại URL Proxy, kết nối mạng hoặc CORS settings.';
+        }
+        setError(errorMsg);
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+        if (displayIntervalRef.current) clearInterval(displayIntervalRef.current);
+        setIsGenerating(false);
       }
-    } finally {
-      clearTimeout(timeoutId);
-      setIsGenerating(false);
-      novelAbortControllerRef.current = null;
     }
   };
 
@@ -790,10 +743,12 @@ YÊU CẦU NỘI DUNG:
     if (!currentNovel || !(content || '').trim()) return;
     
     let updatedNovel: Novel;
+    let savedChapter: Chapter | undefined;
     if (editingChapterId) {
       const updatedChapters = currentNovel.chapters.map(ch => 
         ch.id === editingChapterId ? { ...ch, content: content || '' } : ch
       );
+      savedChapter = updatedChapters.find(ch => ch.id === editingChapterId);
       updatedNovel = { 
         ...currentNovel,
         chapters: updatedChapters,
@@ -809,6 +764,7 @@ YÊU CẦU NỘI DUNG:
         content: content || '',
         timestamp: new Date().toLocaleString()
       };
+      savedChapter = newChapter;
       updatedNovel = { 
         ...currentNovel,
         chapters: [...currentNovel.chapters, newChapter],
@@ -820,6 +776,9 @@ YÊU CẦU NỘI DUNG:
     }
     
     saveNovelToFirebase(updatedNovel);
+    if (savedChapter) {
+      saveChapterToFirebase(updatedNovel.id, savedChapter);
+    }
     setSuccessMessage('Đã lưu chương thành công!');
     // Không setContent('') để người dùng vẫn thấy nội dung vừa lưu
   };
@@ -1450,7 +1409,31 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-stone-500 uppercase mb-1 ml-1">Phong cách viết / Prompt bổ sung</label>
-                          <textarea placeholder="Ví dụ: Viết theo phong cách u tối, lãng mạn, sử dụng nhiều ẩn dụ..." value={currentNovel.writingPrompt} onChange={(e) => updateCurrentNovel({ writingPrompt: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none h-24 resize-none" />
+                          <textarea placeholder="Ví dụ: Viết theo phong cách u tối, lãng mạn, sử dụng nhiều ẩn dụ..." value={currentNovel.writingPrompt} onChange={(e) => updateCurrentNovel({ writingPrompt: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none h-24 resize-none mb-4" />
+                          
+                          <label className="block text-xs font-bold text-stone-500 uppercase mb-2 ml-1">Chọn Văn Phong Mẫu (Có thể chọn nhiều)</label>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto custom-scrollbar p-2 bg-stone-50 rounded-xl border border-stone-200">
+                            {WRITING_STYLES.map(style => {
+                              const isSelected = currentNovel.selectedStyles?.includes(style.id) || false;
+                              return (
+                                <div 
+                                  key={style.id}
+                                  onClick={() => {
+                                    const currentStyles = currentNovel.selectedStyles || [];
+                                    if (isSelected) {
+                                      updateCurrentNovel({ selectedStyles: currentStyles.filter(id => id !== style.id) });
+                                    } else {
+                                      updateCurrentNovel({ selectedStyles: [...currentStyles, style.id] });
+                                    }
+                                  }}
+                                  className={`p-3 rounded-lg border cursor-pointer transition-all text-sm ${isSelected ? 'bg-[#FBCFE8] border-[#DB2777] text-[#9D174D]' : 'bg-white border-stone-200 text-stone-600 hover:border-[#FBCFE8]'}`}
+                                >
+                                  <div className="font-bold mb-1">{style.name}</div>
+                                  <div className="text-xs opacity-80 line-clamp-2">{style.content}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-stone-500 uppercase mb-1 ml-1">Bộ nhớ dài hạn (Cốt truyện & Bối cảnh)</label>
@@ -1536,15 +1519,15 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                             <div>
                               <p className="text-[#DB2777] font-bold text-sm">AI đang sáng tác...</p>
                               <div className="mt-2 flex flex-col items-center">
-                                <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Tiến trình Token</p>
-                                <div className="flex items-center gap-2 text-lg font-mono font-bold text-[#DB2777]">
-                                  <span>{generatedTokens.toLocaleString()}</span>
-                                  <span className="text-stone-300">/</span>
-                                  <span className="text-stone-400">{requestedTokens.toLocaleString()}</span>
-                                </div>
+                              <p className="text-[10px] text-stone-500 font-bold uppercase tracking-wider">Tiến trình (Số ký tự)</p>
+                              <div className="flex items-center gap-2 text-lg font-mono font-bold text-[#DB2777]">
+                                <span>{streamingContent.length.toLocaleString()}</span>
+                                <span className="text-stone-300">/</span>
+                                <span className="text-stone-400">{((nextChapterLength || currentNovel?.chapterLength || 1000) * 4).toLocaleString()}</span>
+                              </div>
                               </div>
                               <p className="text-[10px] text-stone-400 mt-1">
-                                {estimatedTime ? `Dự kiến hoàn thành trong ${estimatedTime} phút` : 'Đang khởi tạo kết nối...'}
+                                {countdownTime !== null ? `Dự kiến hoàn thành trong ${Math.floor(countdownTime / 60)}:${(countdownTime % 60).toString().padStart(2, '0')}` : 'Đang khởi tạo kết nối...'}
                               </p>
                             </div>
                             <div className="w-full bg-stone-100 h-1.5 rounded-full overflow-hidden mt-2">
@@ -1567,7 +1550,8 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                       <textarea 
                         value={content || streamingContent || ''} 
                         onChange={(e) => setContent(e.target.value)}
-                        className="flex-1 w-full bg-transparent text-[#555555] font-serif leading-[2] focus:outline-none resize-none custom-scrollbar min-h-[500px]"
+                        readOnly={isGenerating}
+                        className={`flex-1 w-full bg-transparent text-[#555555] font-serif leading-[2] focus:outline-none resize-none custom-scrollbar min-h-[500px] ${isGenerating ? 'opacity-70 cursor-not-allowed' : ''}`}
                         placeholder="Nội dung chương truyện..."
                         style={{ fontSize: `${fontSize}px` }}
                       />
@@ -1735,6 +1719,7 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                                       setConfirmConfig(null);
                                       const updatedChapters = currentNovel.chapters.filter(ch => ch.id !== chapter.id);
                                       updateCurrentNovel({ chapters: updatedChapters });
+                                      deleteChapterFromFirebase(currentNovel.id, chapter.id);
                                       if (editingChapterId === chapter.id) {
                                         setEditingChapterId(null);
                                         setContent('');

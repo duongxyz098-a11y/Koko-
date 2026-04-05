@@ -4,7 +4,7 @@ export const initKeyValueDB = (): Promise<IDBDatabase> => {
   if (dbInstance) return Promise.resolve(dbInstance);
 
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('BanhNhoKV', 4); // Increment version
+    const request = indexedDB.open('BanhNhoKV', 5); // Increment version
     
     request.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
