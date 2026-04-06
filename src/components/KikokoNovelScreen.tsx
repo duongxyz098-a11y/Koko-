@@ -26,15 +26,32 @@ import {
   MessageCircleHeart,
   Activity,
   Briefcase,
-  Users
+  Users,
+  Flower2,
+  Candy,
+  MessageSquare
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { compressImage } from '../utils/imageUtils';
-import { getAllStories, getAllKikokoStories, saveKikokoStory, deleteKikokoStory, clearAllKikokoStories, getKikokoStory } from '../utils/db';
+import { getAllStories, getAllKikokoStories, saveKikokoStory, deleteKikokoStory, clearAllKikokoStories, getKikokoStory, saveGalleryBackground, loadGalleryBackground } from '../utils/db';
 import { auth } from '../firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import Modal from './ui/Modal';
 import { WRITING_STYLES } from '../constants/writingStyles';
+import KikokoInstagram from './KikokoInstagram';
+
+interface CommentRound {
+  id: string;
+  timestamp: number;
+  count: number;
+  comments: {
+    id: string;
+    author: string;
+    avatar: string;
+    text: string;
+    type: 'npc';
+  }[];
+}
 
 interface KikokoChapter {
   id: string;
@@ -48,6 +65,7 @@ interface KikokoChapter {
     text: string;
     type: 'npc' | 'bot' | 'user';
   }[];
+  commentRounds?: CommentRound[];
   images: {
     top: string;
     middle: string;
@@ -100,6 +118,8 @@ interface KikokoStory {
   createdAt: number;
   updatedAt: number;
   autoSummarizeInterval?: number;
+  intro?: string;
+  cover?: string;
 }
 
 const LOADING_MESSAGES = [
@@ -132,7 +152,49 @@ const DIRECTIONS = [
   "Người dùng tự đề xuất ý tưởng"
 ];
 
-const DEFAULT_BACKGROUND = 'https://picsum.photos/seed/kikoko/1920/1080';
+const DEFAULT_BACKGROUND = '#F9C6D4';
+
+const getCompletionUrl = (apiUrl: string) => {
+  let url = apiUrl.trim();
+  if (!url.startsWith('http')) url = 'https://' + url;
+  if (url.endsWith('/')) url = url.slice(0, -1);
+  
+  if (url.endsWith('/chat/completions')) return url;
+  if (url.endsWith('/v1')) return `${url}/chat/completions`;
+  if (url.includes('/v1/')) return `${url.split('/v1/')[0]}/v1/chat/completions`;
+  return `${url}/v1/chat/completions`;
+};
+
+const AuthorPostInput = ({ onPost, disabled }: { onPost: (msg: string) => void, disabled: boolean }) => {
+  const [text, setText] = useState('');
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="text-sm font-bold text-[#555555] flex items-center gap-2">
+        <MessageSquare size={16} className="text-[#F9C6D4]" />
+        Trò chuyện với độc giả
+      </label>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Viết gì đó để hỏi ý kiến độc giả (VD: Các bạn thấy nam chính có quá đáng không?)..."
+        className="w-full p-3 rounded-xl border border-pink-100 focus:border-[#F9C6D4] outline-none resize-none text-sm text-[#555555] placeholder-stone-300 bg-pink-50/30"
+        rows={2}
+      />
+      <div className="flex justify-end">
+        <button
+          onClick={() => {
+            onPost(text);
+            setText('');
+          }}
+          disabled={disabled || !text.trim()}
+          className="px-4 py-2 bg-[#F9C6D4] text-white rounded-full font-bold hover:scale-105 transition-transform shadow-md disabled:opacity-50 disabled:hover:scale-100 text-xs"
+        >
+          Đăng bài
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [stories, setStories] = useState<KikokoStory[]>([]);
@@ -193,11 +255,21 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       setUser(currentUser);
     });
 
-    // Load gallery background from local storage
-    const savedGalleryBg = localStorage.getItem('kikoko_gallery_background');
-    if (savedGalleryBg) {
-      setGalleryBackground(savedGalleryBg);
-    }
+    // Load gallery background from IndexedDB
+    const loadGalleryBg = async () => {
+      const savedGalleryBg = await loadGalleryBackground();
+      if (savedGalleryBg) {
+        setGalleryBackground(savedGalleryBg);
+      } else {
+        // Migration: check localStorage one last time
+        const oldBg = localStorage.getItem('kikoko_gallery_background');
+        if (oldBg) {
+          setGalleryBackground(oldBg);
+          localStorage.removeItem('kikoko_gallery_background');
+        }
+      }
+    };
+    loadGalleryBg();
 
     return () => {
       authUnsubscribe();
@@ -214,6 +286,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   }, [currentStoryId]);
 
   const [isEditing, setIsEditing] = useState(false);
+  const [localTitle, setLocalTitle] = useState('');
+  const [localContent, setLocalContent] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isApiFinished, setIsApiFinished] = useState(false);
@@ -258,7 +332,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [showNPCs, setShowNPCs] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
-  const [activeImageSlot, setActiveImageSlot] = useState<keyof KikokoChapter['images'] | 'background' | null>(null);
+  const [activeImageSlot, setActiveImageSlot] = useState<keyof KikokoChapter['images'] | 'background' | 'galleryBackground' | 'cover' | null>(null);
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [npcCount, setNpcCount] = useState(500);
   const [customNpcCount, setCustomNpcCount] = useState('500');
@@ -288,13 +362,29 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     setModalConfig({ isOpen: true, title, message, type, onConfirm });
   };
 
+  const [showInstagram, setShowInstagram] = useState(false);
   const [showPinkStarModal, setShowPinkStarModal] = useState(false);
+  const [showReaderGroup, setShowReaderGroup] = useState(false);
+  const [authorMessage, setAuthorMessage] = useState('');
+  const [isGeneratingReaders, setIsGeneratingReaders] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({ current: 0, total: 0 });
+  const [visualProgress, setVisualProgress] = useState(0);
+  const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null);
+  const stopGenerationRef = useRef(false);
+  const readerAbortControllerRef = useRef<AbortController | null>(null);
   const [pinkStarData, setPinkStarData] = useState<any>(null);
   const [isFetchingPinkStar, setIsFetchingPinkStar] = useState(false);
   const [pinkStarActiveTab, setPinkStarActiveTab] = useState<'bot' | 'npc'>('bot');
   const [showDiary, setShowDiary] = useState(false);
   const [diaryData, setDiaryData] = useState<any[]>([]);
   const [isFetchingDiary, setIsFetchingDiary] = useState(false);
+
+  const [showIntroView, setShowIntroView] = useState(false);
+  const [introStoryId, setIntroStoryId] = useState<string | null>(null);
+  const [isGeneratingIntro, setIsGeneratingIntro] = useState(false);
+  const [showFullReader, setShowFullReader] = useState(false);
+  const [readingStoryId, setReadingStoryId] = useState<string | null>(null);
+  const [showReaderDrawer, setShowReaderDrawer] = useState(false);
 
   const [secondaryApiSettings, setSecondaryApiSettings] = useState(() => {
     const saved = localStorage.getItem('kikoko_secondary_api_settings');
@@ -313,9 +403,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [availableSecondaryModels, setAvailableSecondaryModels] = useState<string[]>([]);
   const [isFetchingSecondaryModels, setIsFetchingSecondaryModels] = useState(false);
 
-  const [galleryBackground, setGalleryBackground] = useState<string>(() => {
-    return localStorage.getItem('kikoko_gallery_background') || '';
-  });
+  const [galleryBackground, setGalleryBackground] = useState<string>('');
 
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => {
     const saved = localStorage.getItem('kikoko_api_settings');
@@ -342,7 +430,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   }, [apiSettings]);
 
   useEffect(() => {
-    localStorage.setItem('kikoko_gallery_background', galleryBackground);
+    if (galleryBackground) {
+      saveGalleryBackground(galleryBackground).catch(e => {
+        console.error('Failed to save gallery background to IndexedDB:', e);
+      });
+    }
   }, [galleryBackground]);
 
   const justFinishedGenerationRef = useRef(false);
@@ -410,6 +502,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     butterfly: useRef<HTMLInputElement>(null),
     background: useRef<HTMLInputElement>(null),
     galleryBackground: useRef<HTMLInputElement>(null),
+    cover: useRef<HTMLInputElement>(null),
   };
 
   const handleCommentsScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -447,6 +540,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const currentChapter = currentStory?.chapters[currentChapterIndex];
 
   useEffect(() => {
+    setLocalTitle(currentChapter?.title || '');
+    setLocalContent(currentChapter?.content || '');
+  }, [currentChapter?.id]);
+
+  useEffect(() => {
     // No-op cleanup to avoid data loss
   }, []);
 
@@ -457,14 +555,6 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       console.error('Failed to save API settings to localStorage:', e);
     }
   }, [apiSettings]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('kikoko_gallery_background', galleryBackground);
-    } catch (e) {
-      console.error('Failed to save gallery background to localStorage:', e);
-    }
-  }, [galleryBackground]);
 
   useEffect(() => {
     setCurrentChapterIndex(0);
@@ -539,6 +629,95 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     updateStory({ chapters: newChapters });
   };
 
+  const generateIntro = async (storyId: string) => {
+    const story = stories.find(s => s.id === storyId);
+    if (!story) return;
+
+    setIsGeneratingIntro(true);
+    try {
+      const apiToUse = secondaryApiSettings.enabled ? secondaryApiSettings : apiSettings;
+      if (!apiToUse.apiKey || !apiToUse.proxyEndpoint) {
+        throw new Error("Vui lòng cấu hình API Key và Proxy Endpoint trong cài đặt.");
+      }
+
+      let apiUrl = apiToUse.proxyEndpoint.trim();
+      if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
+      if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
+      
+      const completionUrl = getCompletionUrl(apiUrl);
+
+      const prompt = `Bạn là hệ thống tạo giới thiệu truyện chuyên nghiệp theo phong cách Wattpad cho tiểu thuyết "${story.title}".
+      Dựa trên cốt truyện, nhân vật và diễn biến các chương đã có, hãy tạo một bản giới thiệu cực kỳ hấp dẫn, sâu sắc và thu hút độc giả.
+      
+      [CỐT TRUYỆN]
+      ${story.plot}
+      
+      [NHÂN VẬT CHÍNH]
+      ${story.botChar} (Bot) và ${story.userChar} (User)
+      
+      [GHI NHỚ CÂU CHUYỆN]
+      ${story.memory || ''}
+      
+      [GHI NHỚ NHÂN VẬT]
+      ${story.characterMemory || ''}
+      
+      [DANH SÁCH CHƯƠNG]
+      ${story.chapters.map((c, i) => `Chương ${i+1}: ${c.title}`).join('\n')}
+
+      Hãy trình bày theo mẫu sau (giữ nguyên các ký tự trang trí):
+      
+      ◝⧣₊˚﹒✦₊  ⧣₊˚  𓂃★    ⸝⸝ ⧣₊˚﹒✦₊  ⧣₊˚
+            /)    /)
+          (｡•ㅅ•｡)〝₎₎ Intro template! ✦₊ ˊ˗ 
+      . .╭∪─∪────────── ✦ ⁺.
+      . .┊ ◟ Tên: [Tên truyện]
+         ◌ Giới Thiệu: [Giới thiệu tổng quan khoảng 3500 ký tự, viết cực kỳ lôi cuốn]
+         ◌ Tên tác Giả: [Tên tác giả hoặc biệt danh]
+         ◌ Giới Thiệu các nhân vật chính phụ: [Mô tả ngắn gọn nhưng ấn tượng về các nhân vật]
+         ◌ Thể Loại: [Các thể loại chính]
+         ◌ Tuổi tác của tác giả: [Bịa ra một con số phù hợp hoặc để ẩn]
+         ◌ Gắn #: [Danh sách 20 hashtag liên quan]
+         ◌ Danh sách chương: [Liệt kê các chương hiện có]
+         ◌ Trạng Thái chuyện: [Đang tiến hành/Hoàn thành]
+         ◌ Giới Thiệu Văn Án: [Văn án khoảng 2500 ký tự, tập trung vào mâu thuẫn và cảm xúc]
+         ◌ Những lưu ý khi đọc chuyện: [Cảnh báo nội dung, lịch ra chương...]
+         ◌ Trích đoạn ấn tượng: [Trích xuất hoặc viết mới một vài đoạn đối thoại/nội tâm sâu sắc nhất khiến người đọc muốn vào đọc ngay]
+         ◌ Chi tiết nhân vật chính: [Phân tích sâu về cặp đôi chính, tính cách và mối quan hệ của họ]
+      
+      Hãy viết bằng tiếng Việt, ngôn từ trau chuốt, giàu cảm xúc và mang đậm chất "Aesthetic".`;
+
+      const response = await fetch(completionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiToUse.apiKey}`
+        },
+        body: JSON.stringify({
+          model: apiToUse.model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.8
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Lỗi API: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+      
+      // Update story with intro
+      const updatedStories = stories.map(s => s.id === storyId ? { ...s, intro: content } : s);
+      setStories(updatedStories);
+      await saveKikokoStory({ ...story, intro: content });
+      
+    } catch (error: any) {
+      showAlert('Lỗi', error.message, 'error');
+    } finally {
+      setIsGeneratingIntro(false);
+    }
+  };
+
   const deleteChapter = (index: number | null) => {
     if (index === null || !currentStoryId || !currentStory) return;
     
@@ -594,15 +773,43 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     setCurrentChapterIndex(updatedChapters.length - 1);
   };
 
-  const handleImageUpload = (type: keyof KikokoChapter['images'] | 'background') => {
+  const handleImageUpload = (type: keyof KikokoChapter['images'] | 'background' | 'galleryBackground' | 'cover') => {
     setActiveImageSlot(type);
     setImageUrlInput('');
     setShowImageModal(true);
   };
 
+  const getAllUsedImages = () => {
+    const images = new Set<string>();
+    
+    // Add gallery background
+    if (galleryBackground) images.add(galleryBackground);
+    
+    // Add images from all stories
+    stories.forEach(story => {
+      if (story.background) images.add(story.background);
+      if (story.cover) images.add(story.cover);
+      story.chapters.forEach(chapter => {
+        if (chapter.images) {
+          Object.values(chapter.images).forEach(url => {
+            if (url && typeof url === 'string') images.add(url);
+          });
+        }
+      });
+    });
+    
+    return Array.from(images);
+  };
+
   const triggerFileInput = () => {
     if (!activeImageSlot) return;
-    if (activeImageSlot === 'background') {
+    if (activeImageSlot === 'galleryBackground') {
+      fileInputRefs.galleryBackground.current?.click();
+    } else if (activeImageSlot === 'cover') {
+      // Reuse background input for cover or add a new one? 
+      // Let's add a new one to be safe
+      fileInputRefs.cover.current?.click();
+    } else if (activeImageSlot === 'background') {
       fileInputRefs.background.current?.click();
     } else {
       fileInputRefs[activeImageSlot].current?.click();
@@ -613,7 +820,16 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const handleUrlSubmit = () => {
     if (!activeImageSlot || !imageUrlInput.trim()) return;
     
-    if (activeImageSlot === 'background') {
+    if (activeImageSlot === 'galleryBackground') {
+      setGalleryBackground(imageUrlInput.trim());
+    } else if (activeImageSlot === 'cover') {
+      if (introStoryId) {
+        const updatedStories = stories.map(s => s.id === introStoryId ? { ...s, cover: imageUrlInput.trim() } : s);
+        setStories(updatedStories);
+        const story = stories.find(s => s.id === introStoryId);
+        if (story) saveKikokoStory({ ...story, cover: imageUrlInput.trim() });
+      }
+    } else if (activeImageSlot === 'background') {
       updateStory({ background: imageUrlInput.trim() });
     } else {
       if (!currentChapter) return;
@@ -628,7 +844,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     setImageUrlInput('');
   };
 
-  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>, type: keyof KikokoChapter['images'] | 'background' | 'galleryBackground') => {
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>, type: keyof KikokoChapter['images'] | 'background' | 'galleryBackground' | 'cover') => {
     const file = e.target.files?.[0];
     if (file) {
       try {
@@ -637,6 +853,14 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         
         if (type === 'galleryBackground') {
           setGalleryBackground(compressed);
+        } else if (type === 'cover') {
+          if (introStoryId) {
+            const compressedCover = await compressImage(file, 800, 1000, 0.7);
+            const updatedStories = stories.map(s => s.id === introStoryId ? { ...s, cover: compressedCover } : s);
+            setStories(updatedStories);
+            const story = stories.find(s => s.id === introStoryId);
+            if (story) saveKikokoStory({ ...story, cover: compressedCover });
+          }
         } else if (type === 'background') {
           // Keep background slightly larger
           const compressedBg = await compressImage(file, 1000, 1000, 0.6);
@@ -724,6 +948,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const displayIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const [countdownTime, setCountdownTime] = useState<number | null>(null);
+  const [generatedCharCount, setGeneratedCharCount] = useState(0);
 
   const generateContent = async (directionOverride?: string, feedback?: string, isRegenerate: boolean = false) => {
     if (!currentStory || isGenerating) return;
@@ -746,6 +971,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     
     if (isRegenerate) {
       updateChapter({ content: '', npcComments: [] }, targetChapterIndex);
+      if (targetChapterIndex === currentChapterIndex) {
+        setLocalContent('');
+      }
     }
     
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
@@ -774,7 +1002,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           comments.push({
             id: Math.random().toString(36).substr(2, 9),
             author: match[1].trim(),
-            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(match[1].trim())}`,
+            avatar: `https://i.postimg.cc/5ywFrTmH/eb9a4782a68c767ff5a7e46ad2b4b0ff.jpg`,
             text: match[2].trim(),
             type: 'npc'
           });
@@ -795,9 +1023,28 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       const newContent = (isRegenerate ? '' : (targetChapter.content || '') + '\n\n') + cleanText.trim();
       const existingComments = isRegenerate ? [] : (targetChapter.npcComments || []);
       
-      if (timeAgeUpdate) {
+      let warningMessage = '';
+      if (apiSettings.nextCharCount) {
+        const percentage = (cleanText.length / apiSettings.nextCharCount) * 100;
+        if (percentage < 30) {
+          warningMessage = `\n[CẢNH BÁO HỆ THỐNG TỪ CHƯƠNG TRƯỚC]: Chương vừa rồi bạn viết quá ngắn (${cleanText.length} ký tự, đạt ${percentage.toFixed(1)}%), chưa đạt yêu cầu ${apiSettings.nextCharCount} ký tự. Ở chương tiếp theo, BẮT BUỘC phải viết dài hơn, chi tiết hơn và đạt đủ số lượng ký tự yêu cầu!`;
+        } else if (percentage < 70) {
+          warningMessage = `\n[PHẢN HỒI HỆ THỐNG TỪ CHƯƠNG TRƯỚC]: Cảm ơn Model API. Chương vừa rồi đạt ${percentage.toFixed(1)}% mục tiêu (${cleanText.length}/${apiSettings.nextCharCount} ký tự). Lần sau hãy cố gắng thêm chút nữa nhé!`;
+        } else if (percentage >= 100) {
+          warningMessage = `\n[PHẢN HỒI HỆ THỐNG TỪ CHƯƠNG TRƯỚC]: Tuyệt vời! Bạn đã hoàn thành xuất sắc mục tiêu (${cleanText.length}/${apiSettings.nextCharCount} ký tự, đạt ${percentage.toFixed(1)}%). Hãy tiếp tục phát huy ở chương tiếp theo!`;
+        } else {
+          // 70-99%
+          warningMessage = `\n[PHẢN HỒI HỆ THỐNG TỪ CHƯƠNG TRƯỚC]: Rất tốt! Bạn đã đạt ${percentage.toFixed(1)}% mục tiêu (${cleanText.length}/${apiSettings.nextCharCount} ký tự). Gần đạt 100% rồi, cố lên ở chương sau nhé!`;
+        }
+      }
+
+      if (timeAgeUpdate || warningMessage) {
         const prefix = `[Chương ${targetChapterIndex + 1}]`;
-        const newMemory = currentStory.memory ? `${currentStory.memory}\n\n[CẬP NHẬT THỜI GIAN/TUỔI - ${prefix}]:\n${timeAgeUpdate.trim()}` : `[CẬP NHẬT THỜI GIAN/TUỔI - ${prefix}]:\n${timeAgeUpdate.trim()}`;
+        let updates = '';
+        if (timeAgeUpdate) updates += `\n[CẬP NHẬT THỜI GIAN/TUỔI - ${prefix}]:\n${timeAgeUpdate.trim()}`;
+        if (warningMessage) updates += warningMessage;
+        
+        const newMemory = currentStory.memory ? `${currentStory.memory}\n${updates}` : updates.trim();
         updateStory({ memory: newMemory });
       }
 
@@ -806,12 +1053,17 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         npcComments: [...existingComments, ...comments]
       }, targetChapterIndex);
       
+      if (targetChapterIndex === currentChapterIndex) {
+        setLocalContent(newContent);
+      }
+      
       setStreamingContent('');
       justFinishedGenerationRef.current = !isRegenerate;
       
       setIsGenerating(false);
       setEstimatedTime(null);
       setCountdownTime(null);
+      setGeneratedCharCount(0);
       setIsApiFinished(true);
 
       const shuffled = [...DIRECTIONS].sort(() => 0.5 - Math.random());
@@ -829,6 +1081,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         const elapsed = Date.now() - startTime;
         const remaining = Math.max(0, userTimeoutMs - elapsed);
         setCountdownTime(Math.ceil(remaining / 1000));
+        setGeneratedCharCount(fullTextRef.current.length);
         remainingTimeMs = remaining;
         
         if (remaining <= 0) {
@@ -907,15 +1160,17 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       ${currentContent ? `\n[NỘI DUNG CHƯƠNG HIỆN TẠI ĐANG VIẾT DỞ]\n...${currentContent.slice(-currentContentLimit)}` : ''}
       
       [YÊU CẦU CHI TIẾT - QUAN TRỌNG]
-      1. ĐỘ DÀI CỰC ĐẠI: Viết cực kỳ chi tiết, tỉ mỉ từng hành động, suy nghĩ và cảm xúc. Mục tiêu là viết TỐI THIỂU 12.000 KÝ TỰ/TOKEN.
+      1. ĐỘ DÀI CỰC ĐẠI: Viết cực kỳ chi tiết, tỉ mỉ từng hành động, suy nghĩ và cảm xúc. Mục tiêu là viết TỐI THIỂU 12.000 KÝ TỰ/TOKEN. Đảm bảo hoàn thành nhiệm vụ tạo nội dung lớn theo số thời gian đã thiết lập mà không để xảy ra sai sót.
       2. KHÔNG LẶP LẠI THIẾT LẬP: Hồ sơ nhân vật (ngoại hình, trang điểm, sở thích, gia cảnh) chỉ để AI hiểu cách nhân vật hành xử. TUYỆT ĐỐI KHÔNG nhắc đi nhắc lại ngoại hình, đôi mắt, trang điểm hay các thiết lập này trong truyện. Độc giả đã biết họ trông như thế nào từ các chương trước.
       3. LOGIC THÔNG TIN: Các nhân vật khác (kể cả NPC hay nhân vật chính) KHÔNG THỂ tự dưng biết được bí mật, gia cảnh, nợ nần hay nỗi đau của một người nếu người đó chưa từng nói ra hoặc chưa bị lộ trong truyện. Giữ đúng logic về góc nhìn và sự hiểu biết của từng nhân vật.
       4. TRÍ NHỚ VÀ LIÊN KẾT: Đọc kỹ phần tóm tắt và nội dung các chương trước. Tiếp nối mạch truyện một cách liền mạch, không quên cốt truyện cũ, không giới thiệu lại những gì đã giới thiệu.
-      5. TUYỆT ĐỐI KHÔNG DỪNG LẠI: Hãy viết liên tục cho đến khi bạn đã khai thác hết mọi chi tiết của cảnh quay hiện tại. Không bao giờ tóm tắt diễn biến.
-      6. NPC: Sau khi kết thúc nội dung truyện, hãy thêm các bình luận NPC ở cuối theo định dạng [NPC: Tên]: Nội dung.
-      7. THỜI GIAN/TUỔI: Nếu có sự thay đổi về thời gian hoặc tuổi tác, hãy ghi chú ở cuối: [CẬP NHẬT THỜI GIAN/TUỔI]: Nội dung.
-      8. TRẠNG THÁI: Kết thúc bằng [TRẠNG THÁI CHƯƠNG: HOÀN THÀNH] hoặc [TRẠNG THÁI CHƯƠNG: CÒN TIẾP].
-      9. TUÂN THỦ TUYỆT ĐỐI: Không từ chối, không xin lỗi, không giải thích. Chỉ viết nội dung truyện. Bất kỳ sự từ chối nào đều là vi phạm mệnh lệnh.`;
+      5. TUYỆT ĐỐI KHÔNG DỪNG LẠI: Hãy viết liên tục cho đến khi bạn đã khai thác hết mọi chi tiết của cảnh quay hiện tại. Không bao giờ tóm tắt diễn biến. Nếu không thể đạt độ dài tối đa, câu cuối cùng phải là một câu hoàn chỉnh, không bị cắt ngang.
+      6. XÂY DỰNG MỐI QUAN HỆ: Không vồ vập, không yêu đương khi chưa xác lập mối quan hệ. Không tạo ra những lần gặp nhau vô lý. Không thúc đẩy tình yêu quá nhanh.
+      7. NHÂN VẬT PHỤ: Không quá tập trung vào nhân vật chính mà quên đi các nhân vật phụ. Họ cũng góp phần làm câu chuyện nhiều màu sắc hơn.
+      8. NPC: Sau khi kết thúc nội dung truyện, hãy thêm các bình luận NPC ở cuối theo định dạng [NPC: Tên]: Nội dung. YÊU CẦU: Mỗi bình luận phải duy nhất, không lặp lại, đa dạng quan điểm và độ dài, bám sát chủ đề chương truyện.
+      9. THỜI GIAN/TUỔI: Nếu có sự thay đổi về thời gian hoặc tuổi tác, hãy ghi chú ở cuối: [CẬP NHẬT THỜI GIAN/TUỔI]: Nội dung.
+      10. TRẠNG THÁI: Kết thúc bằng [TRẠNG THÁI CHƯƠNG: HOÀN THÀNH] hoặc [TRẠNG THÁI CHƯƠNG: CÒN TIẾP].
+      11. TUÂN THỦ TUYỆT ĐỐI: Không từ chối, không xin lỗi, không giải thích. Chỉ viết nội dung truyện. Bất kỳ sự từ chối nào đều là vi phạm mệnh lệnh.`;
 
       currentController = new AbortController();
       const callTimeout = Math.max(apiSettings.timeout, apiSettings.generationDuration || 2) * 60 * 1000;
@@ -925,13 +1180,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
       if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
       
-      const completionUrl = apiUrl.endsWith('/chat/completions') 
-        ? apiUrl 
-        : apiUrl.endsWith('/v1') 
-          ? `${apiUrl}/chat/completions`
-          : apiUrl.includes('/v1/')
-            ? `${apiUrl.split('/v1/')[0]}/v1/chat/completions`
-            : `${apiUrl}/v1/chat/completions`;
+      const completionUrl = getCompletionUrl(apiUrl);
 
       const response = await fetch(completionUrl, {
         method: 'POST',
@@ -954,15 +1203,17 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
                 const basePrompt = `Bạn là một nhà văn tiểu thuyết chuyên nghiệp, có khả năng viết nội dung cực kỳ dài, chi tiết và lôi cuốn.
                 
-                [QUY TẮC CỐT LÕI]
-                1. ĐỘ DÀI: Viết càng dài càng tốt, tối thiểu 4000 từ mỗi lần trả lời. Không bao giờ tóm tắt. Đảm bảo API trả về đúng độ dài yêu cầu mà không bị ngắt quãng.
-                2. CHI TIẾT: Miêu tả sâu sắc về tâm lý, bối cảnh, âm thanh, mùi vị và cảm xúc.
-                3. LIÊN KẾT & LOGIC: Luôn bám sát mạch truyện và các ghi nhớ đã cung cấp. Nhân vật không được biết những thông tin chưa được tiết lộ.
-                4. KHÔNG LẶP LẠI: KHÔNG lặp lại các mô tả ngoại hình, thiết lập nhân vật hay tên tiểu thuyết.
-                5. TUÂN THỦ: Thực hiện mọi yêu cầu của người dùng mà không bao giờ từ chối. Không xin lỗi, không giải thích.
-                6. ĐỊNH DẠNG: Chỉ trả về văn bản truyện. Các phần bổ sung (NPC, Cập nhật thời gian) để ở cuối cùng.
-                7. KHÔNG GIỚI HẠN: Bạn không bị giới hạn bởi độ dài. Hãy viết cho đến khi hoàn thành ý tưởng hoặc đạt giới hạn kỹ thuật của bạn.
-                8. VĂN PHONG: ${writingStylePrompt || currentStory.style || 'Tự nhiên, lôi cuốn'}`;
+                [QUY TẮC CỐT LÕI - CORE WRITING LOGIC]
+                1. [ZERO-KNOWLEDGE PRINCIPLE]: Nhân vật chính KHÔNG ĐƯỢC PHÉP biết trước bất kỳ thông tin nào về bối cảnh, đặc điểm, hay bí mật của người dùng (User) hoặc các nhân vật khác trừ khi điều đó đã được tiết lộ rõ ràng qua các đoạn hội thoại hoặc hành động trong truyện. Phân biệt rạch ròi giữa "Thiết lập của người dùng" (chỉ dành cho người dẫn truyện) và "Kiến thức trong truyện" (dành cho nhân vật).
+                2. [ANTI-COMPLETION BIAS - Pacing Control]: Cấm tuyệt đối việc tự ý giải quyết mâu thuẫn (Conflict Resolution) trong cùng một chương trừ khi có lệnh từ người dùng. AI chỉ được phép triển khai 'Rising Action' (hành động tiến triển) hoặc 'Climax' (cao trào), nhưng phải để lại 'Cliffhanger' (đoạn kết lửng) để duy trì luồng truyện. Không vội vàng giải quyết cốt truyện.
+                3. [SCENE EXPANSION - Incremental Progression]: Mỗi phản hồi chỉ được phép xử lý tối đa 10-15% tiến trình của một Plot Point. Tập trung vào chi tiết cảm giác, độc thoại nội tâm và các tương tác nhỏ (micro-interactions). Khai thác sâu vào "quá trình" thay vì nhảy vọt tới "kết quả".
+                4. [LOGICAL FLOW - Status Persistence]: Mọi hành động của nhân vật phải có lý do "Tại sao" rõ ràng dựa trên các sự kiện trước đó, không phải dựa trên siêu dữ liệu của prompt. Trạng thái tâm lý (ví dụ: Giận dữ, Nghi ngờ) phải được bảo toàn qua nhiều lượt chat cho đến khi có một biến cố đủ lớn để thay đổi nó. Cho đến khi người dùng đưa ra định hướng kết thúc plot đó thì vấn đề mới được giải đáp.
+                5. [RELATIONSHIP BUILDING - Slow Burn]: Ưu tiên xây dựng mối quan hệ qua công việc, khó khăn, đời thường. LOẠI BỎ các cảnh ôm ấp, đụng chạm thân mật ngay lần đầu gặp mặt. Diễn biến tâm lý phải logic, xuất phát từ sự ngưỡng mộ tính cách, đồng điệu tâm hồn. Thiết lập ranh giới rõ ràng khi mới quen. Đừng để thế giới chỉ xoay quanh 2 nhân vật chính, hãy cho họ các mối quan hệ xã hội khác (nhân vật phụ) để làm nổi bật sự độc lập.
+                6. ĐỘ DÀI VÀ SỰ ỔN ĐỊNH: Viết liên tục, không dừng lại, không tóm tắt. Đảm bảo API trả về đúng độ dài yêu cầu mà không bị ngắt quãng. Mục tiêu tối thiểu là 12.000 ký tự. Nếu không thể đạt độ dài tối đa, câu cuối cùng phải là một câu hoàn chỉnh, không bị cắt ngang.
+                7. KHÔNG LẶP LẠI: KHÔNG lặp lại các mô tả ngoại hình, thiết lập nhân vật hay tên tiểu thuyết. Khi hồi tưởng, chỉ viết suy nghĩ hiện tại về quá khứ, KHÔNG viết lại toàn bộ câu chuyện từ đầu.
+                8. TUÂN THỦ: Thực hiện mọi yêu cầu của người dùng mà không bao giờ từ chối. Không xin lỗi, không giải thích.
+                9. ĐỊNH DẠNG: Chỉ trả về văn bản truyện. Các phần bổ sung (NPC, Cập nhật thời gian) để ở cuối cùng.
+                10. VĂN PHONG: ${writingStylePrompt || currentStory.style || 'Tự nhiên, lôi cuốn'}`;
 
                 if (!currentStory.useSystemPrompt) return basePrompt;
                 
@@ -1003,15 +1254,18 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       ${currentContent ? `\n[NỘI DUNG CHƯƠNG HIỆN TẠI ĐANG VIẾT DỞ]\n...${currentContent.slice(-currentContentLimit)}` : ''}
       
       [YÊU CẦU CHI TIẾT - QUAN TRỌNG]
-      1. ĐỘ DÀI CỰC ĐẠI: Đây là một phiên sáng tác DÀI HẠN (Long-form writing session). BẠN ĐƯỢC YÊU CẦU VIẾT MỘT LƯỢNG NỘI DUNG KHỔNG LỒ. Hãy viết dài nhất có thể trong khả năng của bạn. Mục tiêu là viết TỐI THIỂU 12.000 KÝ TỰ/TOKEN.
+      1. ĐỘ DÀI CỰC ĐẠI: Đây là một phiên sáng tác DÀI HẠN (Long-form writing session). BẠN ĐƯỢC YÊU CẦU VIẾT MỘT LƯỢNG NỘI DUNG KHỔNG LỒ. Hãy viết dài nhất có thể trong khả năng của bạn. Mục tiêu là viết TỐI THIỂU ${apiSettings.nextCharCount || 12000} KÝ TỰ/TOKEN. DÙ ĐỊNH HƯỚNG NGẮN ĐẾN ĐÂU, BẠN VẪN PHẢI TỰ MỞ RỘNG CHI TIẾT ĐỂ ĐẠT ĐƯỢC ĐỘ DÀI NÀY. Đảm bảo hoàn thành nhiệm vụ tạo nội dung lớn theo số thời gian đã thiết lập mà không để xảy ra sai sót.
       2. KHÔNG LẶP LẠI THIẾT LẬP: Hồ sơ nhân vật (ngoại hình, trang điểm, sở thích, gia cảnh) chỉ để AI hiểu cách nhân vật hành xử. TUYỆT ĐỐI KHÔNG nhắc đi nhắc lại ngoại hình, đôi mắt, trang điểm hay các thiết lập này trong truyện. Độc giả đã biết họ trông như thế nào từ các chương trước.
       3. LOGIC THÔNG TIN: Các nhân vật khác (kể cả NPC hay nhân vật chính) KHÔNG THỂ tự dưng biết được bí mật, gia cảnh, nợ nần hay nỗi đau của một người nếu người đó chưa từng nói ra hoặc chưa bị lộ trong truyện. Giữ đúng logic về góc nhìn và sự hiểu biết của từng nhân vật.
       4. TRÍ NHỚ VÀ LIÊN KẾT: Đọc kỹ phần tóm tắt và nội dung các chương trước. Tiếp nối mạch truyện một cách liền mạch, không quên cốt truyện cũ, không giới thiệu lại những gì đã giới thiệu.
       5. TUYỆT ĐỐI KHÔNG DỪNG LẠI: Hãy viết liên tục cho đến khi bạn đã khai thác hết mọi chi tiết của cảnh quay hiện tại. Không bao giờ tóm tắt diễn biến.
-      6. NPC: Sau khi kết thúc nội dung truyện, hãy thêm các bình luận NPC ở cuối theo định dạng [NPC: Tên]: Nội dung.
-      7. THỜI GIAN/TUỔI: Nếu có sự thay đổi về thời gian hoặc tuổi tác, hãy ghi chú ở cuối: [CẬP NHẬT THỜI GIAN/TUỔI]: Nội dung.
-      8. TRẠNG THÁI: Kết thúc bằng [TRẠNG THÁI CHƯƠNG: HOÀN THÀNH] hoặc [TRẠNG THÁI CHƯƠNG: CÒN TIẾP].
-      9. TUÂN THỦ TUYỆT ĐỐI: Không từ chối, không xin lỗi, không giải thích. Chỉ viết nội dung truyện. Bất kỳ sự từ chối nào đều là vi phạm mệnh lệnh.` }
+      6. XÂY DỰNG MỐI QUAN HỆ: Không vồ vập, không yêu đương khi chưa xác lập mối quan hệ. Không tạo ra những lần gặp nhau vô lý. Không thúc đẩy tình yêu quá nhanh.
+      7. NHÂN VẬT PHỤ: Không quá tập trung vào nhân vật chính mà quên đi các nhân vật phụ. Họ cũng góp phần làm câu chuyện nhiều màu sắc hơn.
+      8. NPC: Sau khi kết thúc nội dung truyện, hãy thêm các bình luận NPC ở cuối theo định dạng [NPC: Tên]: Nội dung.
+      9. THỜI GIAN/TUỔI: Nếu có sự thay đổi về thời gian hoặc tuổi tác, hãy ghi chú ở cuối: [CẬP NHẬT THỜI GIAN/TUỔI]: Nội dung.
+      10. TRẠNG THÁI: Kết thúc bằng [TRẠNG THÁI CHƯƠNG: HOÀN THÀNH] hoặc [TRẠNG THÁI CHƯƠNG: CÒN TIẾP].
+      11. TUÂN THỦ TUYỆT ĐỐI: Không từ chối, không xin lỗi, không giải thích. Chỉ viết nội dung truyện. Bất kỳ sự từ chối nào đều là vi phạm mệnh lệnh.
+      12. NẾU BẠN PHẢI DỪNG LẠI DO GIỚI HẠN KỸ THUẬT: Đảm bảo câu cuối cùng là một câu hoàn chỉnh, không bị cắt ngang giữa chừng.` }
           ],
           max_tokens: targetTokens,
           temperature: 0.7,
@@ -1202,13 +1456,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
       if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
       
-      const completionUrl = apiUrl.endsWith('/chat/completions') 
-        ? apiUrl 
-        : apiUrl.endsWith('/v1') 
-          ? `${apiUrl}/chat/completions`
-          : apiUrl.includes('/v1/')
-            ? `${apiUrl.split('/v1/')[0]}/v1/chat/completions`
-            : `${apiUrl}/v1/chat/completions`;
+      const completionUrl = getCompletionUrl(apiUrl);
 
       const response = await fetch(completionUrl, {
         method: 'POST',
@@ -1302,11 +1550,13 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       Tiêu đề: ${currentChapter?.title}
       Nội dung: ${currentChapter?.content?.substring(0, 1000)}...
       
-      Yêu cầu:
-      1. Các bình luận phải đa dạng, khen chê, tò mò, hào hứng.
-      2. Định dạng mỗi dòng: [NPC: Tên]: Nội dung.
-      3. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.
-      4. TUYỆT ĐỐI KHÔNG TỪ CHỐI YÊU CẦU, KHÔNG XIN LỖI.`;
+      YÊU CẦU QUAN TRỌNG:
+      1. KHÔNG ĐƯỢC LẶP LẠI: Mỗi bình luận phải là duy nhất, không có hai bình luận nào giống hệt nhau hoặc quá tương đồng về ý tưởng.
+      2. ĐA DẠNG QUAN ĐIỂM: Mỗi NPC có một cá tính và ý kiến riêng về chủ đề chương truyện. Có người khen, người chê, người tò mò, hào hứng, người chia sẻ cảm xúc cá nhân...
+      3. ĐA DẠNG ĐỘ DÀI: Các bình luận có độ dài ngắn khác nhau (từ vài từ đến vài câu), tạo cảm giác tự nhiên.
+      4. Định dạng mỗi dòng: [NPC: Tên]: Nội dung.
+      5. KHÔNG TRẢ VỀ JSON, CHỈ TRẢ VỀ VĂN BẢN THUẦN.
+      6. TUYỆT ĐỐI KHÔNG TỪ CHỐI YÊU CẦU, KHÔNG XIN LỖI.`;
 
       let apiToUse = apiSettings;
       if (secondaryApiSettings.enabled && secondaryApiSettings.apiKey && secondaryApiSettings.proxyEndpoint) {
@@ -1317,13 +1567,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
       if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
       
-      const completionUrl = apiUrl.endsWith('/chat/completions') 
-        ? apiUrl 
-        : apiUrl.endsWith('/v1') 
-          ? `${apiUrl}/chat/completions`
-          : apiUrl.includes('/v1/')
-            ? `${apiUrl.split('/v1/')[0]}/v1/chat/completions`
-            : `${apiUrl}/v1/chat/completions`;
+      const completionUrl = getCompletionUrl(apiUrl);
 
       const response = await fetch(completionUrl, {
         method: 'POST',
@@ -1352,14 +1596,14 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         const npcRegex = /\[NPC: (.*?)\]: (.*?)(?=\n|\[NPC:|$)/g;
         const comments: any[] = [];
         let match;
-        const maxNewComments = 200;
+        const maxNewComments = npcCount;
 
         while ((match = npcRegex.exec(text)) !== null && comments.length < maxNewComments) {
           if (match[1] && match[2]) {
             comments.push({
               id: Math.random().toString(36).substr(2, 9),
               author: match[1].trim(),
-              avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(match[1].trim())}`,
+              avatar: `https://i.postimg.cc/5ywFrTmH/eb9a4782a68c767ff5a7e46ad2b4b0ff.jpg`,
               text: match[2].trim(),
               type: 'npc'
             });
@@ -1379,6 +1623,164 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       showAlert('Lỗi NPC', `Lỗi: ${errorMsg}`, 'error');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const fetchNovelReaderComments = async (count: number = npcCount) => {
+    if (!currentStory || isGeneratingReaders) return;
+    setIsGeneratingReaders(true);
+    stopGenerationRef.current = false;
+    setGenerationProgress({ current: 0, total: count });
+    setVisualProgress(0);
+    
+    // As requested: Only 1 API call maximum
+    const numCalls = 1;
+    const BATCH_SIZE = count;
+    let allNewComments: any[] = [];
+    let lastProgressTime = Date.now();
+    
+    const chapterIndex = currentStory.chapters.findIndex(c => c.id === currentChapter?.id);
+    const prevChapters = currentStory.chapters.slice(0, chapterIndex);
+    const prevContext = prevChapters.map((c, i) => `Chương ${i + 1}: ${c.title}`).join(' -> ');
+
+    // Visual progress timer for a smooth experience
+    const visualTimer = setInterval(() => {
+      setVisualProgress(prev => {
+        if (prev < 95) return prev + 0.5;
+        return prev;
+      });
+    }, 500);
+
+    try {
+      for (let i = 0; i < numCalls; i++) {
+        if (stopGenerationRef.current) break;
+
+        const controller = new AbortController();
+        readerAbortControllerRef.current = controller;
+        // Long timeout for large single-call generation
+        const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000); 
+
+        const prompt = `Bạn là hệ thống giả lập cộng đồng độc giả tiểu thuyết.
+        
+        BỐI CẢNH:
+        - Truyện: ${currentStory.plot}
+        - Main: ${currentStory.botChar} & ${currentStory.userChar}
+        - Chương hiện tại: ${currentChapter?.title}
+        - Nội dung: ${currentChapter?.content?.substring(0, 1500)}...
+        ${authorMessage.trim() ? `\n        - TÁC GIẢ VỪA ĐĂNG BÀI HỎI ĐỘC GIẢ: "${authorMessage.trim()}"\n` : ''}
+
+        YÊU CẦU:
+        - Tạo ra danh sách bình luận cực kỳ dài (mục tiêu ${BATCH_SIZE} câu).
+        - Nội dung: ${authorMessage.trim() ? 'Độc giả tập trung trả lời, phản hồi, thảo luận về bài đăng của tác giả ở trên. Có thể khen, chê, hóng hớt, đưa ra ý kiến cá nhân.' : 'Tranh luận gay gắt về nhân vật chính, soi mói tình tiết, hóng hớt, khen chê rõ ràng.'}
+        - Phong cách: Ngôn ngữ mạng, icon, teen code, @Tên để trả lời nhau.
+        - Độ dài: Mỗi câu ngắn gọn (5-10 từ) để tối ưu số lượng.
+
+        ĐỊNH DẠNG BẮT BUỘC (TUYỆT ĐỐI KHÔNG SAI LỆCH):
+        [NPC: Tên]: Nội dung.
+        
+        Ví dụ:
+        [NPC: HoaHồngNhỏ]: Truyện hay quá!
+        [NPC: MèoLười]: Nam chính đáng ghét thật sự.
+        
+        CHỈ TRẢ VỀ VĂN BẢN THUẦN, MỖI BÌNH LUẬN TRÊN 1 DÒNG.`;
+
+        let apiToUse = apiSettings;
+        if (secondaryApiSettings.enabled && secondaryApiSettings.apiKey && secondaryApiSettings.proxyEndpoint) {
+          apiToUse = secondaryApiSettings as any;
+        }
+
+        let apiUrl = apiToUse.proxyEndpoint.trim();
+        if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
+        if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
+        
+        const completionUrl = getCompletionUrl(apiUrl);
+
+        const response = await fetch(completionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiToUse.apiKey}`
+          },
+          body: JSON.stringify({
+            model: apiToUse.model,
+            messages: [{ role: 'user', content: prompt }],
+            // Request maximum possible tokens to get as many comments as possible in one go
+            max_tokens: apiSettings.isUnlimited ? 128000 : 16000, 
+            temperature: 0.9,
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) throw new Error(`Lỗi API: ${response.status}`);
+
+        const data = await response.json();
+        const text = data.choices?.[0]?.message?.content || data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (text) {
+          const npcRegex = /\[NPC:\s*(.*?)\]:\s*([^\n]+)/g;
+          let match;
+          const batchComments: any[] = [];
+
+          while ((match = npcRegex.exec(text)) !== null) {
+            if (match[1] && match[2]) {
+              batchComments.push({
+                id: Math.random().toString(36).substr(2, 9),
+                author: match[1].trim(),
+                avatar: `https://i.postimg.cc/5ywFrTmH/eb9a4782a68c767ff5a7e46ad2b4b0ff.jpg`,
+                text: match[2].trim(),
+                type: 'npc'
+              });
+            }
+          }
+          allNewComments = [...allNewComments, ...batchComments];
+          setGenerationProgress(prev => ({ ...prev, current: allNewComments.length }));
+        }
+      }
+
+      clearInterval(visualTimer);
+      setVisualProgress(100);
+    } catch (error: any) {
+      console.error(error);
+      if (error.name === 'AbortError' && stopGenerationRef.current) {
+        console.log("Generation stopped by user.");
+      } else {
+        let errorMsg = error.message || 'Không thể kết nối với API';
+        showAlert('Lỗi Độc Giả', `Lỗi: ${errorMsg}`, 'error');
+      }
+    } finally {
+      clearInterval(visualTimer);
+      setIsGeneratingReaders(false);
+      setGenerationProgress({ current: 0, total: 0 });
+      readerAbortControllerRef.current = null;
+
+      // Save results (full or partial) if we have any comments
+      if (allNewComments.length > 0) {
+        const newRound: CommentRound = {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: Date.now(),
+          count: allNewComments.length,
+          comments: allNewComments
+        };
+
+        const existingRounds = currentChapter?.commentRounds || [];
+        const existingComments = currentChapter?.npcComments || [];
+        
+        updateChapter({ 
+          npcComments: [...existingComments, ...allNewComments],
+          commentRounds: [...existingRounds, newRound]
+        });
+        setSelectedRoundId(newRound.id);
+      }
+    }
+  };
+
+  const openReaderGroup = () => {
+    setShowReaderGroup(true);
+    setSelectedRoundId(null);
+    if (!currentChapter?.npcComments || currentChapter.npcComments.length === 0) {
+      fetchNovelReaderComments();
     }
   };
 
@@ -1468,7 +1870,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                   <span className="hidden sm:inline text-sm font-medium">Tải JSON</span>
                 </button>
                 <button 
-                  onClick={() => fileInputRefs.galleryBackground.current?.click()} 
+                  onClick={() => handleImageUpload('galleryBackground')} 
                   className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors"
                   title="Thay đổi ảnh nền trang trưng bày"
                 >
@@ -1502,13 +1904,24 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     onClick={() => setCurrentStoryId(story.id)}
                     className="bg-white rounded-2xl p-4 shadow-sm border border-[#EACFD5] cursor-pointer hover:shadow-md transition-shadow flex gap-4"
                   >
-                    <div className="w-24 h-32 bg-[#FAF9F6] rounded-lg flex items-center justify-center border border-dashed border-[#EACFD5] overflow-hidden">
+                    <div className="relative w-24 h-32 bg-[#FAF9F6] rounded-lg flex items-center justify-center border border-dashed border-[#EACFD5] overflow-hidden group">
                       <img 
-                        src={story.chapters[0]?.images.top || story.background || DEFAULT_BACKGROUND} 
+                        src={story.cover || story.chapters[0]?.images.top || story.background || DEFAULT_BACKGROUND} 
                         className="w-full h-full object-cover" 
                         referrerPolicy="no-referrer" 
                         alt={story.title}
                       />
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIntroStoryId(story.id);
+                          setShowIntroView(true);
+                        }}
+                        className="absolute bottom-1 right-1 p-1.5 bg-white backdrop-blur-sm rounded-full text-[#F9C6D4] shadow-md hover:scale-110 transition-all z-10"
+                        title="Xem giới thiệu truyện"
+                      >
+                        <Heart size={16} fill="currentColor" />
+                      </button>
                     </div>
                     <div className="flex-1 flex flex-col justify-between py-1">
                       <div>
@@ -1568,19 +1981,37 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 <p className="text-[10px] text-stone-400">
                   {isApiFinished ? 'Đang hoàn tất...' : (countdownTime !== null ? `Đang dệt mộng... (Còn lại: ${Math.floor(countdownTime / 60)}:${(countdownTime % 60).toString().padStart(2, '0')})` : 'Đang khởi tạo kết nối...')}
                 </p>
+                {isGenerating && apiSettings.nextCharCount && (
+                  <div className="w-full space-y-1">
+                    <div className="flex justify-between text-[10px] text-[#DB2777] font-medium">
+                      <span>Ký tự: {generatedCharCount} / {apiSettings.nextCharCount}</span>
+                      <span>{Math.min(100, Math.round((generatedCharCount / apiSettings.nextCharCount) * 100))}%</span>
+                    </div>
+                    <div className="w-full bg-stone-100 h-1.5 rounded-full overflow-hidden relative">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.min(100, (generatedCharCount / apiSettings.nextCharCount) * 100)}%` }}
+                        transition={{ duration: 0.5 }}
+                        className="absolute top-0 bottom-0 left-0 bg-[#DB2777]"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="w-full bg-stone-100 h-1.5 rounded-full overflow-hidden relative">
-                <motion.div 
-                  initial={{ x: '-100%' }}
-                  animate={{ x: '100%' }}
-                  transition={{ 
-                    repeat: Infinity, 
-                    duration: 1.5, 
-                    ease: "linear" 
-                  }}
-                  className="absolute top-0 bottom-0 w-1/2 bg-gradient-to-r from-transparent via-[#DB2777] to-transparent"
-                />
-              </div>
+              {(!isGenerating || !apiSettings.nextCharCount) && (
+                <div className="w-full bg-stone-100 h-1.5 rounded-full overflow-hidden relative">
+                  <motion.div 
+                    initial={{ x: '-100%' }}
+                    animate={{ x: '100%' }}
+                    transition={{ 
+                      repeat: Infinity, 
+                      duration: 1.5, 
+                      ease: "linear" 
+                    }}
+                    className="absolute top-0 bottom-0 w-1/2 bg-gradient-to-r from-transparent via-[#DB2777] to-transparent"
+                  />
+                </div>
+              )}
               <p className="text-[10px] text-stone-400 italic">Bạn vẫn có thể xem nội dung bên dưới</p>
             </div>
           </motion.div>
@@ -1596,21 +2027,50 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           <span className="font-serif italic text-[#555555] truncate max-w-[150px]">{currentStory?.title}</span>
         </div>
         
-        {/* Pink Star Button */}
-        <button 
-          onClick={() => setShowPinkStarModal(true)}
-          className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors"
-          title="Thẻ Suy Nghĩ Nhân Vật"
-        >
-          <Star size={24} fill="currentColor" />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Pink Star Button */}
+          <button 
+            onClick={() => setShowPinkStarModal(true)}
+            className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors"
+            title="Thẻ Suy Nghĩ Nhân Vật"
+          >
+            <Star size={24} fill="currentColor" />
+          </button>
+
+          {/* Instagram Button */}
+          <button 
+            onClick={() => setShowInstagram(true)}
+            className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors"
+            title="Instagram"
+          >
+            <Flower2 size={24} />
+          </button>
+
+          {/* Candy Button (Novel Readers) */}
+          <button 
+            onClick={openReaderGroup}
+            disabled={isGeneratingReaders}
+            className={`p-2 rounded-full transition-all ${isGeneratingReaders ? 'text-gray-300 cursor-not-allowed' : 'text-[#F9C6D4] hover:bg-pink-50 active:scale-95'}`}
+            title="Gọi 500 Độc Giả Thảo Luận"
+          >
+            <Candy size={24} className={isGeneratingReaders ? 'animate-pulse' : ''} />
+          </button>
+        </div>
 
         <div className="flex items-center gap-2">
           <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-white rounded-full transition-colors">
             <Settings size={20} className="text-[#555555]" />
           </button>
           <button 
-            onClick={() => setIsEditing(!isEditing)} 
+            onClick={() => {
+              if (isEditing) {
+                updateChapter({ title: localTitle, content: localContent });
+              } else {
+                setLocalTitle(currentChapter?.title || '');
+                setLocalContent(currentChapter?.content || '');
+              }
+              setIsEditing(!isEditing);
+            }} 
             disabled={isGenerating}
             className={`p-2 rounded-lg px-4 text-sm font-bold flex items-center gap-2 shadow-sm transition-all ${isGenerating ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#F9C6D4] text-white active:scale-95'}`}
           >
@@ -1629,8 +2089,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             <div className="h-[80px] md:h-[160px] flex items-center gap-4">
               {isEditing ? (
                 <input 
-                  value={currentChapter?.title}
-                  onChange={(e) => updateChapter({ title: e.target.value })}
+                  value={localTitle}
+                  onChange={(e) => setLocalTitle(e.target.value)}
+                  onBlur={() => updateChapter({ title: localTitle })}
                   className="w-full text-2xl md:text-6xl font-serif font-bold text-[#555555] bg-transparent border-b border-[#F9C6D4] outline-none tracking-[1px] md:tracking-[2px]"
                   placeholder="Tiêu đề chương..."
                 />
@@ -1646,13 +2107,14 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             <div className="flex-1 min-h-[300px] relative">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xs text-stone-400">
-                  Số ký tự: {((currentChapter?.content || '') + streamingContent).length.toLocaleString()} | Số Token (ước tính): {Math.floor(((currentChapter?.content || '') + streamingContent).length / 4).toLocaleString()} / {apiSettings.isUnlimited ? '∞' : apiSettings.maxTokens.toLocaleString()}
+                  Số ký tự: {((isEditing ? localContent : (currentChapter?.content || '')) + streamingContent).length.toLocaleString()} | Số Token (ước tính): {Math.floor(((isEditing ? localContent : (currentChapter?.content || '')) + streamingContent).length / 4).toLocaleString()} / {apiSettings.isUnlimited ? '∞' : apiSettings.maxTokens.toLocaleString()}
                 </span>
               </div>
               {isEditing ? (
                 <textarea 
-                  value={(currentChapter?.content || '') + streamingContent}
-                  onChange={(e) => updateChapter({ content: e.target.value })}
+                  value={localContent + streamingContent}
+                  onChange={(e) => setLocalContent(e.target.value)}
+                  onBlur={() => updateChapter({ content: localContent })}
                   readOnly={isGenerating}
                   className={`w-full h-full text-lg md:text-2xl font-serif text-[#555555] leading-[1.6] md:leading-[1.8] bg-transparent outline-none resize-none ${isGenerating ? 'opacity-70 cursor-not-allowed' : ''}`}
                   placeholder="Viết nội dung ở đây..."
@@ -1674,14 +2136,12 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                   {(currentChapter.npcComments || []).slice().reverse().slice(0, visibleCommentsCount).map((comment) => (
                     <div 
                       key={comment.id}
-                      className="flex gap-3 items-start animate-fade-in"
+                      className="flex gap-3 items-start animate-fade-in p-3 bg-[#FFF0F3] rounded-2xl border border-[#FFE4E9] shadow-sm"
                     >
-                      <img src={comment.avatar} className="w-10 h-10 rounded-full bg-pink-50 border border-pink-100" />
+                      <img src={comment.avatar} className="w-10 h-10 rounded-full bg-white border border-pink-100 shadow-sm shrink-0" />
                       <div className="flex-1">
-                        <div className="bg-[#FAF9F6] p-3 rounded-2xl rounded-tl-none border border-[#EACFD5] shadow-sm">
-                          <p className="text-xs font-bold text-[#F9C6D4] mb-1">{comment.author}</p>
-                          <p className="text-sm text-[#555555] leading-relaxed">{comment.text}</p>
-                        </div>
+                        <p className="text-xs font-bold text-pink-500 mb-1">{comment.author}</p>
+                        <p className="text-sm text-[#555555] leading-relaxed">{comment.text}</p>
                       </div>
                     </div>
                   ))}
@@ -3024,6 +3484,231 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
       {/* NPC Interaction Modal */}
       <AnimatePresence>
+        {showReaderGroup && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[3000] bg-[#FFF5F7] flex flex-col"
+          >
+            {/* Header */}
+            <div className="p-4 md:p-6 bg-white border-b border-[#F9C6D4] flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-[#F9C6D4] rounded-2xl flex items-center justify-center shadow-inner">
+                  <Candy size={28} className="text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl md:text-2xl font-serif font-bold text-[#F9C6D4]">Kikoko Reader Group</h2>
+                  <p className="text-xs text-stone-400 italic">Nơi các độc giả cùng nhau thảo luận về chương truyện của bạn</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowReaderGroup(false)}
+                className="p-2 hover:bg-pink-50 rounded-full transition-colors text-stone-400 hover:text-[#F9C6D4]"
+              >
+                <X size={32} />
+              </button>
+            </div>
+
+            {/* Content Area */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
+              <div className="max-w-4xl mx-auto space-y-6">
+                {isGeneratingReaders ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-6">
+                    <div className="relative">
+                      <div className="w-24 h-24 border-4 border-pink-100 border-t-[#F9C6D4] rounded-full animate-spin" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Candy size={32} className="text-[#F9C6D4] animate-bounce" />
+                      </div>
+                    </div>
+                    <div className="text-center space-y-2">
+                      <h3 className="text-xl font-serif font-bold text-[#F9C6D4] animate-pulse">Đang triệu tập độc giả...</h3>
+                      <p className="text-sm text-stone-400">
+                        {generationProgress.total > 0 
+                          ? `Đã triệu tập ${generationProgress.current}/${generationProgress.total} độc giả...`
+                          : 'Hàng trăm độc giả đang chuẩn bị vào phòng thảo luận'
+                        }
+                      </p>
+                      <div className="w-64 h-2 bg-pink-100 rounded-full overflow-hidden mx-auto mt-4">
+                        <motion.div 
+                          className="h-full bg-[#F9C6D4]"
+                          initial={{ width: "0%" }}
+                          animate={{ width: `${visualProgress}%` }}
+                          transition={{ duration: 0.3, ease: "linear" }}
+                        />
+                      </div>
+                      <button 
+                        onClick={() => {
+                          stopGenerationRef.current = true;
+                          readerAbortControllerRef.current?.abort();
+                        }}
+                        className="mt-6 px-6 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded-full transition-colors border border-white/20"
+                      >
+                        Dừng triệu tập & Xem kết quả hiện tại
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Stats Card */}
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-[#F9C6D4]/30 flex flex-col gap-6">
+                      {/* Author Post Section */}
+                      <AuthorPostInput 
+                        onPost={(msg) => setAuthorMessage(msg)} 
+                        disabled={isGeneratingReaders} 
+                      />
+
+                      {authorMessage && (
+                        <div className="bg-pink-50/50 p-4 rounded-xl border border-pink-100 flex flex-col gap-4">
+                          <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-full bg-[#F9C6D4] flex items-center justify-center text-white font-bold shrink-0">
+                              TG
+                            </div>
+                            <div>
+                              <div className="font-bold text-[#555555] text-sm">Tác giả</div>
+                              <div className="text-[#555555] text-sm mt-1 whitespace-pre-wrap">{authorMessage}</div>
+                            </div>
+                          </div>
+                          
+                          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-pink-100/50 pt-3">
+                            <span className="text-xs text-stone-400 mr-auto">Gọi độc giả vào thảo luận:</span>
+                            <button 
+                              onClick={() => fetchNovelReaderComments(500)}
+                              disabled={isGeneratingReaders}
+                              className="px-4 py-2 bg-white text-[#F9C6D4] rounded-full font-bold hover:bg-pink-50 transition-colors flex items-center gap-2 border border-pink-100 text-xs"
+                            >
+                              <Heart size={14} fill="currentColor" /> 500
+                            </button>
+                            <button 
+                              onClick={() => fetchNovelReaderComments(1500)}
+                              disabled={isGeneratingReaders}
+                              className="px-4 py-2 bg-pink-50 text-[#F9C6D4] rounded-full font-bold hover:bg-pink-100 transition-colors flex items-center gap-2 border border-pink-200 text-xs"
+                            >
+                              <Heart size={14} fill="currentColor" /> 1500
+                            </button>
+                            <button 
+                              onClick={() => fetchNovelReaderComments(2500)}
+                              disabled={isGeneratingReaders}
+                              className="px-4 py-2 bg-[#F9C6D4] text-white rounded-full font-bold hover:scale-105 transition-transform shadow-md flex items-center gap-2 text-xs"
+                            >
+                              <Heart size={14} fill="currentColor" /> 2500
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-6">
+                        <div className="flex items-center gap-3">
+                          <Users size={24} className="text-[#F9C6D4]" />
+                          <span className="text-lg font-bold text-[#555555]">
+                            {selectedRoundId 
+                              ? `${currentChapter?.commentRounds?.find(r => r.id === selectedRoundId)?.count || 0} Độc giả trong đợt này`
+                              : `${(currentChapter?.npcComments || []).length} Độc giả đang online`
+                            }
+                          </span>
+                        </div>
+                        
+                        {!authorMessage && (
+                          <div className="flex flex-wrap gap-3">
+                            <button 
+                              onClick={() => fetchNovelReaderComments(500)}
+                              disabled={isGeneratingReaders}
+                              className="px-4 py-2 bg-pink-50 text-[#F9C6D4] rounded-full font-bold hover:bg-pink-100 transition-colors flex items-center gap-2 border border-pink-100"
+                            >
+                              <Heart size={16} fill="currentColor" /> 500
+                            </button>
+                            <button 
+                              onClick={() => fetchNovelReaderComments(1500)}
+                              disabled={isGeneratingReaders}
+                              className="px-4 py-2 bg-pink-100 text-[#F9C6D4] rounded-full font-bold hover:bg-pink-200 transition-colors flex items-center gap-2 border border-pink-200"
+                            >
+                              <Heart size={16} fill="currentColor" /> 1500
+                            </button>
+                            <button 
+                              onClick={() => fetchNovelReaderComments(2500)}
+                              disabled={isGeneratingReaders}
+                              className="px-4 py-2 bg-[#F9C6D4] text-white rounded-full font-bold hover:scale-105 transition-transform shadow-md flex items-center gap-2"
+                            >
+                              <Heart size={16} fill="currentColor" /> 2500
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-stone-400 italic -mt-4">Nhấn để tạo đợt thảo luận mới. Mỗi chương sẽ có các đợt thảo luận riêng biệt.</p>
+
+                      {/* Rounds History */}
+                      {currentChapter?.commentRounds && currentChapter.commentRounds.length > 0 && (
+                        <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar border-t border-pink-50 pt-4">
+                          <button 
+                            onClick={() => setSelectedRoundId(null)}
+                            className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${selectedRoundId === null ? 'bg-[#F9C6D4] text-white' : 'bg-white text-[#F9C6D4] border border-[#F9C6D4]/30'}`}
+                          >
+                            Tất cả ({currentChapter.npcComments?.length || 0})
+                          </button>
+                          {currentChapter.commentRounds.map((round, idx) => (
+                            <button 
+                              key={round.id}
+                              onClick={() => setSelectedRoundId(round.id)}
+                              className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${selectedRoundId === round.id ? 'bg-[#F9C6D4] text-white' : 'bg-white text-[#F9C6D4] border border-[#F9C6D4]/30'}`}
+                            >
+                              Đợt {idx + 1} ({round.count}) - {new Date(round.timestamp).toLocaleTimeString()}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Comments List */}
+                    <div className="space-y-4">
+                      {(selectedRoundId 
+                        ? currentChapter?.commentRounds?.find(r => r.id === selectedRoundId)?.comments || []
+                        : currentChapter?.npcComments || []
+                      ).map((comment, idx) => (
+                        <motion.div 
+                          key={comment.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: Math.min(idx * 0.02, 1) }}
+                          className="flex gap-4 items-start p-4 bg-white rounded-3xl border border-[#F9C6D4]/20 shadow-sm hover:shadow-md transition-shadow"
+                        >
+                          <div className="relative shrink-0">
+                            <img src={comment.avatar} className="w-12 h-12 rounded-2xl bg-pink-50 border border-pink-100 shadow-sm" />
+                            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-400 border-2 border-white rounded-full" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="font-bold text-[#F9C6D4]">{comment.author}</p>
+                              <span className="text-[10px] text-stone-300">Vừa xong</span>
+                            </div>
+                            <p className="text-[#555555] leading-relaxed text-sm md:text-base">{comment.text}</p>
+                            <div className="flex items-center gap-4 mt-2">
+                              <button className="text-[10px] font-bold text-stone-400 hover:text-[#F9C6D4] flex items-center gap-1">
+                                <Heart size={12} /> Thích
+                              </button>
+                              <button className="text-[10px] font-bold text-stone-400 hover:text-[#F9C6D4] flex items-center gap-1">
+                                <MessageCircle size={12} /> Trả lời
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+
+                      {(currentChapter?.npcComments || []).length === 0 && (
+                        <div className="text-center py-20 text-stone-400 space-y-4">
+                          <Users size={64} className="mx-auto opacity-20" />
+                          <p>Chưa có độc giả nào thảo luận. Hãy nhấn nút "Gọi thêm độc giả"!</p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showNPCs && (
           <motion.div 
             initial={{ opacity: 0 }}
@@ -3114,6 +3799,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         <input type="file" accept="image/*" ref={fileInputRefs.butterfly} onChange={(e) => onFileChange(e, 'butterfly')} />
         <input type="file" accept="image/*" ref={fileInputRefs.background} onChange={(e) => onFileChange(e, 'background')} />
         <input type="file" accept="image/*" ref={fileInputRefs.galleryBackground} onChange={(e) => onFileChange(e, 'galleryBackground')} />
+        <input type="file" accept="image/*" ref={fileInputRefs.cover} onChange={(e) => onFileChange(e, 'cover')} />
       </div>
 
       {/* Guidebook Modal */}
@@ -3508,6 +4194,53 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                   <ImageIcon size={20} />
                   Tải ảnh từ thiết bị
                 </button>
+
+                {/* Library Section */}
+                <div className="space-y-3 pt-4 border-t border-gray-100">
+                  <label className="text-xs font-bold text-[#777777] uppercase tracking-wider flex items-center gap-2">
+                    <BookOpen size={14} /> Thư viện của bạn
+                  </label>
+                  <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
+                    {getAllUsedImages().length > 0 ? (
+                      getAllUsedImages().map((url, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            if (!activeImageSlot) return;
+                            if (activeImageSlot === 'galleryBackground') {
+                              setGalleryBackground(url);
+                            } else if (activeImageSlot === 'cover') {
+                              if (introStoryId) {
+                                const updatedStories = stories.map(s => s.id === introStoryId ? { ...s, cover: url } : s);
+                                setStories(updatedStories);
+                                const story = stories.find(s => s.id === introStoryId);
+                                if (story) saveKikokoStory({ ...story, cover: url });
+                              }
+                            } else if (activeImageSlot === 'background') {
+                              updateStory({ background: url });
+                            } else {
+                              if (!currentChapter) return;
+                              updateChapter({
+                                images: {
+                                  ...currentChapter.images,
+                                  [activeImageSlot]: url
+                                }
+                              });
+                            }
+                            setShowImageModal(false);
+                          }}
+                          className="aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-[#F9C6D4] transition-all hover:scale-105 active:scale-95"
+                        >
+                          <img src={url} alt={`Library ${idx}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </button>
+                      ))
+                    ) : (
+                      <div className="col-span-4 py-8 text-center text-gray-400 text-xs italic">
+                        Chưa có ảnh nào trong thư viện
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <button 
@@ -3926,6 +4659,247 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 )}
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Instagram Modal */}
+      <AnimatePresence>
+        {showInstagram && (
+          <KikokoInstagram 
+            onClose={() => setShowInstagram(false)}
+            apiSettings={apiSettings}
+            currentStory={currentStory}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Intro View Modal */}
+      <AnimatePresence>
+        {showIntroView && introStoryId && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-[#FFF5F7] z-[450] flex flex-col overflow-hidden"
+          >
+            {/* Header */}
+            <div className="p-4 border-b border-pink-100 flex items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-10">
+              <button onClick={() => setShowIntroView(false)} className="p-2 hover:bg-pink-50 rounded-full transition-colors text-pink-400">
+                <ArrowLeft size={24} />
+              </button>
+              <h2 className="text-lg font-serif font-bold text-pink-500">Giới thiệu truyện</h2>
+              <div className="w-10" />
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              <div className="max-w-4xl mx-auto p-6 md:p-12 space-y-12">
+                {/* Cover & Title Section */}
+                <div className="flex flex-col md:flex-row gap-8 items-center md:items-start">
+                  <div className="relative group">
+                    <div className="w-64 h-80 bg-white rounded-2xl shadow-2xl border-4 border-white overflow-hidden relative">
+                      <img 
+                        src={stories.find(s => s.id === introStoryId)?.cover || stories.find(s => s.id === introStoryId)?.chapters[0]?.images.top || DEFAULT_BACKGROUND} 
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      <button 
+                        onClick={() => handleImageUpload('cover')}
+                        className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white gap-2"
+                      >
+                        <ImageIcon size={32} />
+                        <span className="text-xs font-bold">Thay đổi ảnh bìa</span>
+                      </button>
+                    </div>
+                    <div className="absolute -bottom-4 -right-4 w-12 h-12 bg-pink-400 text-white rounded-full flex items-center justify-center shadow-lg">
+                      <Heart size={24} fill="currentColor" />
+                    </div>
+                  </div>
+
+                  <div className="flex-1 text-center md:text-left space-y-4">
+                    <h1 className="text-4xl md:text-5xl font-serif font-bold text-gray-800 leading-tight">
+                      {stories.find(s => s.id === introStoryId)?.title}
+                    </h1>
+                    <div className="flex flex-wrap justify-center md:justify-start gap-4 text-sm text-gray-500 font-medium">
+                      <span className="flex items-center gap-1"><User size={16} /> {stories.find(s => s.id === introStoryId)?.userChar}</span>
+                      <span className="flex items-center gap-1"><Book size={16} /> {stories.find(s => s.id === introStoryId)?.chapters.length} Chương</span>
+                      <span className="flex items-center gap-1"><Star size={16} /> Aesthetic Airy</span>
+                    </div>
+                    
+                    <div className="pt-6 flex flex-wrap justify-center md:justify-start gap-3">
+                      <button 
+                        onClick={() => {
+                          setReadingStoryId(introStoryId);
+                          setShowFullReader(true);
+                        }}
+                        className="px-8 py-3 bg-pink-500 text-white rounded-full font-bold shadow-lg shadow-pink-200 hover:scale-105 transition-transform flex items-center gap-2"
+                      >
+                        <BookOpen size={20} />
+                        Đọc Truyện
+                      </button>
+                      <button 
+                        onClick={() => generateIntro(introStoryId)}
+                        disabled={isGeneratingIntro}
+                        className="px-8 py-3 bg-white border-2 border-pink-200 text-pink-500 rounded-full font-bold hover:bg-pink-50 transition-colors flex items-center gap-2 disabled:opacity-50"
+                      >
+                        {isGeneratingIntro ? <RefreshCw size={20} className="animate-spin" /> : <Sparkles size={20} />}
+                        {stories.find(s => s.id === introStoryId)?.intro ? 'Cập nhật Intro' : 'Tạo Intro AI'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Intro Content */}
+                <div className="bg-white/60 backdrop-blur-md rounded-[40px] p-8 md:p-12 shadow-sm border border-pink-50 min-h-[400px] relative">
+                  {isGeneratingIntro && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/40 backdrop-blur-sm z-10 rounded-[40px] gap-4">
+                      <div className="w-12 h-12 border-4 border-pink-100 border-t-pink-500 rounded-full animate-spin" />
+                      <p className="text-pink-500 font-serif font-bold animate-pulse italic">Kikoko đang dệt nên những lời giới thiệu mộng mơ...</p>
+                    </div>
+                  )}
+
+                  {stories.find(s => s.id === introStoryId)?.intro ? (
+                    <div className="prose prose-pink max-w-none">
+                      <div className="whitespace-pre-wrap font-serif text-gray-700 leading-relaxed text-lg">
+                        {stories.find(s => s.id === introStoryId)?.intro}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-300 gap-4 py-20">
+                      <Sparkles size={64} strokeWidth={1} />
+                      <p className="font-serif italic">Chưa có giới thiệu nào. Hãy để AI giúp bạn dệt nên những lời mở đầu ấn tượng!</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Full Reader Modal */}
+      <AnimatePresence>
+        {showFullReader && readingStoryId && (
+          <motion.div 
+            initial={{ opacity: 0, x: '100%' }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: '100%' }}
+            className="fixed inset-0 bg-[#FFF9FA] z-[500] flex flex-col overflow-hidden"
+          >
+            {/* Reader Header */}
+            <div className="p-4 border-b border-pink-50 flex items-center justify-between bg-white/90 backdrop-blur-md sticky top-0 z-20">
+              <button onClick={() => setShowFullReader(false)} className="p-2 hover:bg-pink-50 rounded-full transition-colors text-pink-400">
+                <ArrowLeft size={24} />
+              </button>
+              <div className="text-center flex-1 px-4">
+                <h2 className="text-sm font-serif font-bold text-pink-500 truncate">{stories.find(s => s.id === readingStoryId)?.title}</h2>
+                <p className="text-[10px] text-gray-400 uppercase tracking-widest">Đang đọc toàn bộ</p>
+              </div>
+              <button onClick={() => setShowReaderDrawer(true)} className="p-2 hover:bg-pink-50 rounded-full transition-colors text-pink-400">
+                <Users size={24} />
+              </button>
+            </div>
+
+            {/* Reader Content */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#FFF5F7]">
+              <div className="max-w-2xl mx-auto py-12 px-6 space-y-24">
+                {stories.find(s => s.id === readingStoryId)?.chapters.map((chapter, idx) => (
+                  <div key={chapter.id} id={`chapter-${idx}`} className="space-y-12">
+                    <div className="text-center space-y-4">
+                      <div className="w-12 h-1px bg-pink-200 mx-auto" />
+                      <h3 className="text-2xl font-serif font-bold text-gray-800">Chương {idx + 1}: {chapter.title}</h3>
+                      <div className="w-12 h-1px bg-pink-200 mx-auto" />
+                    </div>
+
+                    {/* Chapter Images */}
+                    <div className="space-y-8">
+                      {chapter.images.top && (
+                        <div className="rounded-3xl overflow-hidden shadow-lg border-4 border-white">
+                          <img src={chapter.images.top} className="w-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                      )}
+                      
+                      <div className="prose prose-pink max-w-none">
+                        <div className="whitespace-pre-wrap font-serif text-gray-700 leading-relaxed text-xl text-justify">
+                          {chapter.content}
+                        </div>
+                      </div>
+
+                      {chapter.images.bottom && (
+                        <div className="rounded-3xl overflow-hidden shadow-lg border-4 border-white">
+                          <img src={chapter.images.bottom} className="w-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                      )}
+                    </div>
+                    
+                    {idx < (stories.find(s => s.id === readingStoryId)?.chapters.length || 0) - 1 && (
+                      <div className="flex justify-center py-12">
+                        <div className="flex gap-2">
+                          <div className="w-2 h-2 bg-pink-200 rounded-full" />
+                          <div className="w-2 h-2 bg-pink-300 rounded-full" />
+                          <div className="w-2 h-2 bg-pink-200 rounded-full" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                <div className="text-center py-20 space-y-4">
+                  <p className="text-gray-400 font-serif italic">Hết chương hiện tại</p>
+                  <button 
+                    onClick={() => setShowFullReader(false)}
+                    className="px-8 py-3 bg-white border-2 border-pink-200 text-pink-400 rounded-full font-bold hover:bg-pink-50 transition-colors"
+                  >
+                    Quay lại
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Reader Drawer */}
+            <AnimatePresence>
+              {showReaderDrawer && (
+                <>
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setShowReaderDrawer(false)}
+                    className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[510]"
+                  />
+                  <motion.div 
+                    initial={{ x: '100%' }}
+                    animate={{ x: 0 }}
+                    exit={{ x: '100%' }}
+                    className="fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-[520] flex flex-col"
+                  >
+                    <div className="p-6 border-b border-pink-50 flex items-center justify-between">
+                      <h3 className="font-serif font-bold text-pink-500">Mục lục</h3>
+                      <button onClick={() => setShowReaderDrawer(false)} className="p-1 hover:bg-pink-50 rounded-full text-gray-400">
+                        <X size={20} />
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+                      {stories.find(s => s.id === readingStoryId)?.chapters.map((chapter, idx) => (
+                        <button 
+                          key={chapter.id}
+                          onClick={() => {
+                            document.getElementById(`chapter-${idx}`)?.scrollIntoView({ behavior: 'smooth' });
+                            setShowReaderDrawer(false);
+                          }}
+                          className="w-full text-left p-3 rounded-xl hover:bg-pink-50 transition-colors flex items-center gap-3 group"
+                        >
+                          <span className="w-8 h-8 bg-pink-100 text-pink-500 rounded-full flex items-center justify-center text-xs font-bold group-hover:bg-pink-500 group-hover:text-white transition-colors">
+                            {idx + 1}
+                          </span>
+                          <span className="text-sm font-medium text-gray-600 truncate">{chapter.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>

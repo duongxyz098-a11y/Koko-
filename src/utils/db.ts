@@ -5,8 +5,9 @@ const STORE_NAME = 'bot_cards';
 const BG_STORE_NAME = 'backgrounds';
 const STORY_STORE_NAME = 'stories';
 const KIKOKO_STORY_STORE_NAME = 'kikoko_stories';
+const KIKOKO_IG_STORE_NAME = 'kikoko_ig';
 const CHAT_STORE_NAME = 'chat_history';
-const VERSION = 5;
+const VERSION = 6;
 
 export async function getDB(): Promise<IDBPDatabase> {
   return openDB(DB_NAME, VERSION, {
@@ -25,6 +26,9 @@ export async function getDB(): Promise<IDBPDatabase> {
       }
       if (!db.objectStoreNames.contains(CHAT_STORE_NAME)) {
         db.createObjectStore(CHAT_STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(KIKOKO_IG_STORE_NAME)) {
+        db.createObjectStore(KIKOKO_IG_STORE_NAME);
       }
     },
   });
@@ -145,4 +149,24 @@ export async function deleteKikokoStory(id: string) {
 export async function clearAllKikokoStories() {
   const db = await getDB();
   await db.clear(KIKOKO_STORY_STORE_NAME);
+}
+
+export async function saveKikokoInstagram(storyId: string, data: any) {
+  const db = await getDB();
+  await db.put(KIKOKO_IG_STORE_NAME, data, storyId);
+}
+
+export async function loadKikokoInstagram(storyId: string): Promise<any> {
+  const db = await getDB();
+  return await db.get(KIKOKO_IG_STORE_NAME, storyId);
+}
+
+export async function saveGalleryBackground(base64: string) {
+  const db = await getDB();
+  await db.put(BG_STORE_NAME, base64, 'kikoko_gallery_background');
+}
+
+export async function loadGalleryBackground(): Promise<string | null> {
+  const db = await getDB();
+  return (await db.get(BG_STORE_NAME, 'kikoko_gallery_background')) || null;
 }
