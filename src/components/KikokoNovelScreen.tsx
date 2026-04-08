@@ -29,7 +29,9 @@ import {
   Users,
   Flower2,
   Candy,
-  MessageSquare
+  MessageSquare,
+  Hourglass,
+  Play
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { compressImage } from '../utils/imageUtils';
@@ -39,6 +41,9 @@ import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import Modal from './ui/Modal';
 import { WRITING_STYLES } from '../constants/writingStyles';
 import KikokoInstagram from './KikokoInstagram';
+import KikokoNPCSchedule from './KikokoNPCSchedule';
+import KikokoNPCFuture from './KikokoNPCFuture';
+import KikokoNPCYouTube from './KikokoNPCYouTube';
 
 interface CommentRound {
   id: string;
@@ -154,7 +159,7 @@ const DIRECTIONS = [
 
 const DEFAULT_BACKGROUND = '#F9C6D4';
 
-const getCompletionUrl = (apiUrl: string) => {
+export const getCompletionUrl = (apiUrl: string) => {
   let url = apiUrl.trim();
   if (!url.startsWith('http')) url = 'https://' + url;
   if (url.endsWith('/')) url = url.slice(0, -1);
@@ -363,6 +368,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   };
 
   const [showInstagram, setShowInstagram] = useState(false);
+  const [showNPCSchedule, setShowNPCSchedule] = useState(false);
+  const [showNPCFuture, setShowNPCFuture] = useState(false);
+  const [showYouTube, setShowYouTube] = useState(false);
   const [showPinkStarModal, setShowPinkStarModal] = useState(false);
   const [showReaderGroup, setShowReaderGroup] = useState(false);
   const [authorMessage, setAuthorMessage] = useState('');
@@ -2019,15 +2027,15 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="z-10 p-4 flex items-center justify-between bg-white/80 backdrop-blur-sm border-b border-[#EACFD5]">
-        <div className="flex items-center gap-2">
+      <div className="z-10 p-4 flex items-center justify-between bg-white/80 backdrop-blur-sm border-b border-[#EACFD5] gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setCurrentStoryId(null)} className="p-2 hover:bg-white rounded-full transition-colors">
             <ArrowLeft size={20} className="text-[#555555]" />
           </button>
-          <span className="font-serif italic text-[#555555] truncate max-w-[150px]">{currentStory?.title}</span>
+          <span className="font-serif italic text-[#555555] truncate max-w-[100px] md:max-w-[150px] hidden sm:inline-block">{currentStory?.title}</span>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-1 flex-1 justify-start md:justify-center px-2">
           {/* Pink Star Button */}
           <button 
             onClick={() => setShowPinkStarModal(true)}
@@ -2046,6 +2054,40 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             <Flower2 size={24} />
           </button>
 
+          {/* NPC Schedule Button */}
+          <button 
+            onClick={() => setShowNPCSchedule(true)}
+            className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors"
+            title="Thời Khoá Biểu NPC"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 12h6v10H9z" fill="currentColor" fillOpacity="0.2"/>
+              <path d="M10 6h4v6h-4z" />
+              <path d="M11 2l2 0 1 4h-4z" fill="currentColor" />
+            </svg>
+          </button>
+
+          {/* NPC Future Button */}
+          <button 
+            onClick={() => setShowNPCFuture(true)}
+            className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors"
+            title="20 Năm Sau"
+          >
+            <Hourglass size={24} />
+          </button>
+
+          {/* YouTube Button */}
+          <button 
+            onClick={() => setShowYouTube(true)}
+            className="p-2 hover:bg-pink-50 rounded-full transition-colors flex items-center justify-center"
+            title="YouTube"
+          >
+            <div className="w-[28px] h-[22px] bg-white rounded-[10px] flex items-center justify-center transform rotate-2 border-2 border-[#F9C6D4] shadow-sm relative overflow-hidden">
+              <div className="absolute inset-0 bg-[#F9C6D4]/10" />
+              <div className="w-0 h-0 border-t-[5px] border-t-transparent border-l-[8px] border-l-[#F9C6D4] border-b-[5px] border-b-transparent ml-[2px] transform rotate-[-2deg]"></div>
+            </div>
+          </button>
+
           {/* Candy Button (Novel Readers) */}
           <button 
             onClick={openReaderGroup}
@@ -2057,7 +2099,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-white rounded-full transition-colors">
             <Settings size={20} className="text-[#555555]" />
           </button>
@@ -4670,6 +4712,52 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             onClose={() => setShowInstagram(false)}
             apiSettings={apiSettings}
             currentStory={currentStory}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* NPC Schedule Modal */}
+      <AnimatePresence>
+        {showNPCSchedule && (
+          <KikokoNPCSchedule 
+            onClose={() => setShowNPCSchedule(false)}
+            apiSettings={apiSettings}
+            secondaryApiSettings={secondaryApiSettings}
+            currentStory={currentStory}
+            currentChapter={currentChapter}
+            getCompletionUrl={getCompletionUrl}
+            updateStory={updateStory}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* NPC Future Modal */}
+      <AnimatePresence>
+        {showNPCFuture && (
+          <KikokoNPCFuture 
+            onClose={() => setShowNPCFuture(false)}
+            apiSettings={apiSettings}
+            secondaryApiSettings={secondaryApiSettings}
+            currentStory={currentStory}
+            currentChapter={currentChapter}
+            getCompletionUrl={getCompletionUrl}
+            updateStory={updateStory}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* YouTube Modal */}
+      <AnimatePresence>
+        {showYouTube && (
+          <KikokoNPCYouTube 
+            onClose={() => setShowYouTube(false)}
+            apiSettings={apiSettings}
+            secondaryApiSettings={secondaryApiSettings}
+            currentStory={currentStory}
+            currentChapter={currentChapter}
+            updateStory={updateStory}
+            galleryBackground={galleryBackground}
+            getCompletionUrl={getCompletionUrl}
           />
         )}
       </AnimatePresence>
