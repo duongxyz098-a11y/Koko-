@@ -58,18 +58,53 @@ export default function KikokoNPCFuture({ onClose, apiSettings, secondaryApiSett
     const loadProfiles = async () => {
       try {
         const data = await loadKikokoInstagram(currentStory.id);
+        let loadedProfiles: Profile[] = [];
+        
         if (data && data.profiles) {
-          setProfiles(data.profiles);
-          if (data.profiles.length > 0) {
-            setActiveProfile(data.profiles[0]);
-          }
+          loadedProfiles = [...data.profiles];
+        }
+
+        // Find and remove existing main profiles to re-insert them at the front
+        const botIndex = loadedProfiles.findIndex(p => p.id === 'char_bot');
+        const botProfile = botIndex !== -1 ? loadedProfiles.splice(botIndex, 1)[0] : null;
+        
+        const userIndex = loadedProfiles.findIndex(p => p.id === 'char_user');
+        const userProfile = userIndex !== -1 ? loadedProfiles.splice(userIndex, 1)[0] : null;
+
+        // Re-insert User profile at the front
+        if (userProfile) {
+          loadedProfiles.unshift(userProfile);
+        } else {
+          loadedProfiles.unshift({
+            id: 'char_user',
+            name: currentStory.userChar || 'User Character',
+            avatar: 'https://i.postimg.cc/5ywFrTmH/eb9a4782a68c767ff5a7e46ad2b4b0ff.jpg',
+            type: 'char'
+          });
+        }
+
+        // Re-insert Bot profile at the front
+        if (botProfile) {
+          loadedProfiles.unshift(botProfile);
+        } else {
+          loadedProfiles.unshift({
+            id: 'char_bot',
+            name: currentStory.botChar || 'Bot Character',
+            avatar: 'https://i.postimg.cc/5ywFrTmH/eb9a4782a68c767ff5a7e46ad2b4b0ff.jpg',
+            type: 'char'
+          });
+        }
+
+        setProfiles(loadedProfiles);
+        if (loadedProfiles.length > 0 && !activeProfile) {
+          setActiveProfile(loadedProfiles[0]);
         }
       } catch (e) {
         console.error("Failed to load profiles", e);
       }
     };
     loadProfiles();
-  }, [currentStory.id]);
+  }, [currentStory.id, currentStory.botChar, currentStory.userChar]);
 
   const robustParseJSON = (content: string) => {
     try {
@@ -264,22 +299,26 @@ export default function KikokoNPCFuture({ onClose, apiSettings, secondaryApiSett
         </button>
 
         <div className="max-w-4xl mx-auto pt-6 px-4">
-          <div className="flex gap-[15px] overflow-x-auto pb-2 custom-scrollbar justify-center">
+          <div className="flex gap-[15px] overflow-x-auto pb-2 custom-scrollbar">
             {profiles.map(profile => (
-              <button
-                key={profile.id}
-                onClick={() => setActiveProfile(profile)}
-                className={`shrink-0 w-[60px] h-[60px] rounded-full border-2 p-[2px] transition-all ${activeProfile?.id === profile.id ? 'border-[#F9C6D4] scale-110 shadow-md' : 'border-pink-100/50 opacity-70 hover:opacity-100'}`}
-              >
-                <div className="w-full h-full rounded-full overflow-hidden bg-pink-50">
-                  {profile.avatar && <img src={profile.avatar} alt={profile.name} className="w-full h-full object-cover" />}
-                </div>
-              </button>
+              <div key={profile.id} className="flex flex-col items-center gap-1 shrink-0">
+                <button
+                  onClick={() => setActiveProfile(profile)}
+                  className={`w-[60px] h-[60px] rounded-full border-2 p-[2px] transition-all ${activeProfile?.id === profile.id ? 'border-[#F9C6D4] scale-110 shadow-md' : 'border-pink-100/50 opacity-70 hover:opacity-100'}`}
+                >
+                  <div className="w-full h-full rounded-full overflow-hidden bg-pink-50">
+                    {profile.avatar && <img src={profile.avatar} alt={profile.name} className="w-full h-full object-cover" />}
+                  </div>
+                </button>
+                <span className={`text-[10px] font-medium max-w-[60px] truncate text-center ${activeProfile?.id === profile.id ? 'text-[#D18E9B]' : 'text-stone-400'}`}>
+                  {profile.name}
+                </span>
+              </div>
             ))}
           </div>
 
           {activeProfile && (
-            <div className="flex gap-2 overflow-x-auto mt-4 pb-2 custom-scrollbar justify-center px-4">
+            <div className="flex gap-2 overflow-x-auto mt-4 pb-2 custom-scrollbar px-2">
               {(history[activeProfile.id] || []).map((gen, idx) => (
                 <button
                   key={gen.id}

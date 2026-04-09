@@ -46,7 +46,9 @@ import { WRITING_STYLES } from '../constants/writingStyles';
 import KikokoInstagram from './KikokoInstagram';
 import KikokoNPCSchedule from './KikokoNPCSchedule';
 import KikokoNPCFuture from './KikokoNPCFuture';
+import KikokoInnerThoughts from './KikokoInnerThoughts';
 import KikokoNPCYouTube from './KikokoNPCYouTube';
+import KikokoNPCNovelWriting from './KikokoNPCNovelWriting';
 
 interface CommentRound {
   id: string;
@@ -97,6 +99,7 @@ interface ApiSettings {
   maxTokens: number;
   timeout: number; // in minutes
   isUnlimited: boolean;
+  enabled?: boolean;
   responseHistory?: number[];
   nextChars?: string;
   nextCharCount?: number;
@@ -124,6 +127,7 @@ interface KikokoStory {
   npcMemory?: string;
   briefingForNextChapter?: string;
   useSmartMemory?: boolean;
+  autoUpdateSmartMemory?: boolean;
   
   // New Fields for User Request
   currentTime?: string;
@@ -133,6 +137,10 @@ interface KikokoStory {
   currentDate?: string;
   loveProgress?: string;
   loveDevelopment?: string;
+  ongoingEvents?: string;
+  progressSummary?: string;
+  userDescription?: string;
+  charDescription?: string;
   
   style: string;
   chapters: KikokoChapter[];
@@ -202,9 +210,9 @@ const AuthorPostInput = ({ onPost, disabled }: { onPost: (msg: string) => void, 
         <MessageSquare size={16} className="text-[#F9C6D4]" />
         Trò chuyện với độc giả
       </label>
-      <textarea
+      <DebouncedTextarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(val: string) => setText(val)}
         placeholder="Viết gì đó để hỏi ý kiến độc giả (VD: Các bạn thấy nam chính có quá đáng không?)..."
         className="w-full p-3 rounded-xl border border-pink-100 focus:border-[#F9C6D4] outline-none resize-none text-sm text-[#555555] placeholder-stone-300 bg-pink-50/30"
         rows={2}
@@ -223,6 +231,51 @@ const AuthorPostInput = ({ onPost, disabled }: { onPost: (msg: string) => void, 
       </div>
     </div>
   );
+};
+
+// Helper components for smooth typing in large forms
+const DebouncedInput = ({ value, onChange, ...props }: any) => {
+  const [localValue, setLocalValue] = useState(value || '');
+  const timerRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (value !== localValue) {
+      setLocalValue(value || '');
+    }
+  }, [value]);
+
+  const handleChange = (e: any) => {
+    const val = e.target.value;
+    setLocalValue(val);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      onChange(val);
+    }, 300);
+  };
+
+  return <input {...props} value={localValue} onChange={handleChange} />;
+};
+
+const DebouncedTextarea = ({ value, onChange, ...props }: any) => {
+  const [localValue, setLocalValue] = useState(value || '');
+  const timerRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (value !== localValue) {
+      setLocalValue(value || '');
+    }
+  }, [value]);
+
+  const handleChange = (e: any) => {
+    const val = e.target.value;
+    setLocalValue(val);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      onChange(val);
+    }, 300);
+  };
+
+  return <textarea {...props} value={localValue} onChange={handleChange} />;
 };
 
 export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
@@ -397,7 +450,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [showInstagram, setShowInstagram] = useState(false);
   const [showNPCSchedule, setShowNPCSchedule] = useState(false);
   const [showNPCFuture, setShowNPCFuture] = useState(false);
+  const [showInnerThoughts, setShowInnerThoughts] = useState(false);
   const [showYouTube, setShowYouTube] = useState(false);
+  const [showNPCNovelWriting, setShowNPCNovelWriting] = useState(false);
   const [showPinkStarModal, setShowPinkStarModal] = useState(false);
   const [showReaderGroup, setShowReaderGroup] = useState(false);
   const [authorMessage, setAuthorMessage] = useState('');
@@ -607,6 +662,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       style: 'Lãng mạn, nhẹ nhàng',
       memory: '',
       characterMemory: '',
+      userDescription: '',
+      charDescription: '',
+      ongoingEvents: '',
+      progressSummary: '',
+      autoUpdateSmartMemory: true,
       chapters: [{
         id: 'ch1',
         title: 'Chương 1',
@@ -720,6 +780,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       - Tiến độ tình yêu: ${currentStory.loveProgress || 'Chưa có'}
       - Tiến độ phát triển tình cảm: ${currentStory.loveDevelopment || 'Chưa có'}
       - Sự kiện: ${currentStory.eventList || 'Chưa có'}
+      - Sự kiện đang dở dang: ${currentStory.ongoingEvents || 'Chưa có'}
+      - Tiến độ sắp xếp (50 ý): ${currentStory.progressSummary || 'Chưa có'}
       - Tóm tắt ngày: ${currentStory.dailySummary || 'Chưa có'}
       - Tình huống: ${currentStory.situationTracking || 'Chưa có'}
       - Cần tránh: ${currentStory.thingsToAvoid || 'Chưa có'}
@@ -734,6 +796,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         "season": "Mùa...",
         "loveProgress": "Tiến độ tình yêu...",
         "loveDevelopment": "Tiến độ phát triển tình cảm...",
+        "ongoingEvents": "Các sự kiện đang diễn ra dở dang từ chương trước (tối đa 1000 tokens)...",
+        "progressSummary": "Cập nhật danh sách 50 ý chính (mỗi ý 150-200 ký tự) tóm tắt toàn bộ diễn biến từ đầu đến nay...",
         "eventList": "Danh sách sự kiện...",
         "relationshipProgress": "Các nhân vật chính đang tiến triển...",
         "dailySummary": "Tóm tắt ngày...",
@@ -785,6 +849,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
               season: smartData.season,
               loveProgress: smartData.loveProgress,
               loveDevelopment: smartData.loveDevelopment,
+              ongoingEvents: smartData.ongoingEvents,
+              progressSummary: smartData.progressSummary,
               eventList: smartData.eventList,
               relationshipProgress: smartData.relationshipProgress,
               dailySummary: smartData.dailySummary,
@@ -829,7 +895,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       Quốc tịch: ${story.nationality || 'Chưa xác định'}
       
       [NHÂN VẬT CHÍNH]
-      ${story.botChar} (Bot) và ${story.userChar} (User)
+      ${story.botChar} (Bot): ${story.charDescription || 'Chưa có chi tiết'}
+      ${story.userChar} (User): ${story.userDescription || 'Chưa có chi tiết'}
       
       [GHI NHỚ CÂU CHUYỆN]
       ${story.memory || ''}
@@ -1280,7 +1347,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       setIsApiFinished(true);
 
       // Call Smart Memory generation if enabled
-      if (currentStory.useSmartMemory) {
+      if (currentStory.useSmartMemory && currentStory.autoUpdateSmartMemory) {
         generateSmartMemory();
       }
 
@@ -1370,6 +1437,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       
       const prompt = `Hãy viết tiếp chương này. TUYỆT ĐỐI KHÔNG lặp lại tên tiểu thuyết ("${currentStory?.title}") trong nội dung truyện.
       
+      [QUY TẮC NGỮ CẢNH - QUAN TRỌNG]
+      - Bạn CHỈ được phép sử dụng thông tin từ CÂU CHUYỆN CHÍNH (Main Story).
+      - TUYỆT ĐỐI KHÔNG được sử dụng, nhắc lại hay ghi nhớ bất kỳ tình tiết nào từ các bộ truyện riêng của NPC (NPC Novels). Câu chuyện chính và truyện của NPC là hai thế giới song song, truyện chính không được phép biết về nội dung truyện riêng của NPC.
+      
       [HỒ SƠ THIẾT LẬP - CHỈ DÙNG ĐỂ HIỂU NHÂN VẬT VÀ CỐT TRUYỆN, KHÔNG ĐƯỢC NHẮC LẠI TRONG TRUYỆN]
       Cốt truyện: ${currentStory?.plot}
       Quốc tịch: ${currentStory?.nationality || 'Chưa xác định'}
@@ -1381,7 +1452,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       Tiến độ tình yêu: ${currentStory?.loveProgress || 'Chưa có'}
       Tiến độ phát triển tình cảm: ${currentStory?.loveDevelopment || 'Chưa có'}
       Nhân vật Bot: ${currentStory?.botChar}
+      Chi tiết Bot: ${currentStory?.charDescription || 'Chưa có chi tiết'}
       Nhân vật User: ${currentStory?.userChar}
+      Chi tiết User: ${currentStory?.userDescription || 'Chưa có chi tiết'}
       Phong cách: ${currentStory?.style}
       Prompt bổ sung: ${currentStory?.prompt}
       ${currentStory?.characterMemory ? `Ghi nhớ về các nhân vật: ${currentStory?.characterMemory}` : ''}
@@ -1442,7 +1515,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 const basePrompt = `Bạn là một nhà văn tiểu thuyết chuyên nghiệp, có khả năng viết nội dung cực kỳ dài, chi tiết và lôi cuốn.
                 
                 [QUY TẮC CỐT LÕI - CORE WRITING LOGIC]
-                1. [VĂN HÓA, QUỐC TỊCH VÀ BỐI CẢNH]: ĐÂY LÀ QUY TẮC QUAN TRỌNG NHẤT. Quốc tịch hiện tại là: ${currentStory?.nationality || 'Chưa xác định'}. Dù viết bằng tiếng Việt, BẠN PHẢI TUÂN THỦ TUYỆT ĐỐI văn hóa, phong tục, thói quen sinh hoạt, món ăn, cách xưng hô (ví dụ: -san, -kun trong tiếng Nhật hoặc các đại từ phù hợp trong tiếng Trung), và bối cảnh của quốc gia đó. TUYỆT ĐỐI KHÔNG để nhân vật hành xử, ăn uống, hay sinh hoạt như người Việt Nam. Nếu nhân vật ở Nhật Bản, món ăn phải là đồ Nhật, phong tục phải là phong tục Nhật. KHÔNG ĐƯỢC NHẦM LẪN VỚI VĂN HÓA VIỆT NAM.
+                1. [VĂN HÓA, QUỐC TỊCH VÀ BỐI CẢNH]: ĐÂY LÀ QUY TẮC QUAN TRỌNG NHẤT. Quốc tịch hiện tại là: ${currentStory?.nationality || 'Chưa xác định'}. Dù viết bằng tiếng Việt, BẠN PHẢI TUÂN THỦ TUYỆT ĐỐI văn hóa, phong tục, thói quen sinh hoạt, món ăn, cách xưng hô (ví dụ: -san, -kun trong tiếng Nhật hoặc các đại từ phù hợp trong tiếng Trung), và bối cảnh của quốc gia đó. Hãy đưa vào các chi tiết về địa danh, khu du lịch, phong tục tập quán, ẩm thực đặc trưng của nước đó. TUYỆT ĐỐI KHÔNG để nhân vật hành xử, ăn uống, hay sinh hoạt như người Việt Nam. Nếu nhân vật ở Nhật Bản, món ăn phải là đồ Nhật, phong tục phải là phong tục Nhật. KHÔNG ĐƯỢC NHẦM LẪN VỚI VĂN HÓA VIỆT NAM. Ngôn ngữ sử dụng vẫn là tiếng Việt nhưng phải mang đậm hơi thở văn hóa quốc gia đó.
                 2. [ZERO-KNOWLEDGE PRINCIPLE]: Nhân vật chính KHÔNG ĐƯỢC PHÉP biết trước bất kỳ thông tin nào về bối cảnh, đặc điểm, hay bí mật của người dùng (User) hoặc các nhân vật khác trừ khi điều đó đã được tiết lộ rõ ràng qua các đoạn hội thoại hoặc hành động trong truyện. Phân biệt rạch ròi giữa "Thiết lập của người dùng" (chỉ dành cho người dẫn truyện) và "Kiến thức trong truyện" (dành cho nhân vật).
                 3. [ANTI-COMPLETION BIAS - Pacing Control]: Cấm tuyệt đối việc tự ý giải quyết mâu thuẫn (Conflict Resolution) trong cùng một chương trừ khi có lệnh từ người dùng. AI chỉ được phép triển khai 'Rising Action' (hành động tiến triển) hoặc 'Climax' (cao trào), nhưng phải để lại 'Cliffhanger' (đoạn kết lửng) để duy trì luồng truyện. Không vội vàng giải quyết cốt truyện.
                 4. [SCENE EXPANSION - Incremental Progression]: Mỗi phản hồi chỉ được phép xử lý tối đa 10-15% tiến trình của một Plot Point. Tập trung vào chi tiết cảm giác, độc thoại nội tâm và các tương tác nhỏ (micro-interactions). Khai thác sâu vào "quá trình" thay vì nhảy vọt tới "kết quả".
@@ -1471,13 +1544,17 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       Cốt truyện: ${currentStory?.plot}
       Quốc tịch: ${currentStory?.nationality || 'Chưa xác định'}
       Nhân vật Bot: ${currentStory?.botChar}
+      Chi tiết Bot: ${currentStory?.charDescription || 'Chưa có chi tiết'}
       Nhân vật User: ${currentStory?.userChar}
+      Chi tiết User: ${currentStory?.userDescription || 'Chưa có chi tiết'}
       Phong cách: ${currentStory?.style}
       Prompt bổ sung: ${currentStory?.prompt}
       ${currentStory?.characterMemory ? `Ghi nhớ về các nhân vật: ${currentStory?.characterMemory}` : ''}
       ${currentStory?.useSmartMemory ? `
       [BỘ NHỚ THÔNG MINH - SMART MEMORY]
       - LỜI NHẮC TỪ TRỢ LÝ BIÊN TẬP (API PHỤ): ${currentStory.briefingForNextChapter || 'Chưa có'}
+      - Sự kiện đang dở dang: ${currentStory.ongoingEvents || 'Chưa có'}
+      - Tiến độ sắp xếp (50 ý): ${currentStory.progressSummary || 'Chưa có'}
       - Danh sách sự kiện: ${currentStory.eventList || 'Chưa có'}
       - Tiến triển nhân vật: ${currentStory.relationshipProgress || 'Chưa có'}
       - Tóm tắt ngày: ${currentStory.dailySummary || 'Chưa có'}
@@ -1597,10 +1674,15 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       if (displayIntervalRef.current) clearInterval(displayIntervalRef.current);
       
       console.error(error);
+      
+      // CRITICAL: Even on error, if we have content, try to save it
+      if (fullTextRef.current.length > 50) {
+        console.log("Error occurred but content exists, attempting to save...");
+        await finishGeneration();
+      }
+
       if (error.name === 'AbortError') {
-        if (fullTextRef.current.length > 0) {
-          await finishGeneration();
-        } else {
+        if (fullTextRef.current.length === 0) {
           showAlert('Hết thời gian', 'Thời gian chờ quá lâu. Hệ thống đã tự động ngắt kết nối.', 'warning');
           setIsGenerating(false);
           setEstimatedTime(null);
@@ -2323,6 +2405,24 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             <Hourglass size={24} />
           </button>
 
+          {/* Inner Thoughts Button */}
+          <button 
+            onClick={() => setShowInnerThoughts(true)}
+            className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors flex items-center justify-center"
+            title="Khám Phá Nội Tâm"
+          >
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 2px rgba(249,198,212,0.5))' }}>
+              <path d="M12 21.5C7.5 21.5 4 17.5 4 12.5C4 9.5 5.5 7.5 7.5 6.5C8.5 6 10 5.5 12 5.5C14 5.5 15.5 6 16.5 6.5C18.5 7.5 20 9.5 20 12.5C20 17.5 16.5 21.5 12 21.5Z" fill="#FFE4E8" stroke="#F9C6D4" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M12 5.5C11 4.5 9.5 3.5 8 3.5M12 5.5C13 4.5 14.5 3.5 16 3.5M12 5.5V2.5" stroke="#A8D5BA" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="9.5" cy="11.5" r="1" fill="#F9C6D4"/>
+              <circle cx="14.5" cy="11.5" r="1" fill="#F9C6D4"/>
+              <circle cx="12" cy="15.5" r="1" fill="#F9C6D4"/>
+              <circle cx="8.5" cy="16" r="1" fill="#F9C6D4"/>
+              <circle cx="15.5" cy="16" r="1" fill="#F9C6D4"/>
+              <circle cx="12" cy="8.5" r="1" fill="#F9C6D4"/>
+            </svg>
+          </button>
+
           {/* YouTube Button */}
           <button 
             onClick={() => setShowYouTube(true)}
@@ -2343,6 +2443,15 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             title="Gọi 500 Độc Giả Thảo Luận"
           >
             <Candy size={24} className={isGeneratingReaders ? 'animate-pulse' : ''} />
+          </button>
+
+          {/* NPC Novel Writing Button */}
+          <button 
+            onClick={() => setShowNPCNovelWriting(true)}
+            className="p-2 text-[#F9C6D4] hover:bg-pink-50 rounded-full transition-colors flex items-center justify-center"
+            title="Viết Tiểu Thuyết NPC"
+          >
+            <Book size={24} className="transform -rotate-3" />
           </button>
         </div>
 
@@ -2377,9 +2486,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             {/* Title Block */}
             <div className="h-[80px] md:h-[160px] flex items-center gap-4">
               {isEditing ? (
-                <input 
+                <DebouncedInput 
                   value={localTitle}
-                  onChange={(e) => setLocalTitle(e.target.value)}
+                  onChange={(val: string) => setLocalTitle(val)}
                   onBlur={() => updateChapter({ title: localTitle })}
                   className="w-full text-2xl md:text-6xl font-serif font-bold text-[#555555] bg-transparent border-b border-[#F9C6D4] outline-none tracking-[1px] md:tracking-[2px]"
                   placeholder="Tiêu đề chương..."
@@ -2400,9 +2509,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 </span>
               </div>
               {isEditing ? (
-                <textarea 
+                <DebouncedTextarea 
                   value={localContent + streamingContent}
-                  onChange={(e) => setLocalContent(e.target.value)}
+                  onChange={(val: string) => setLocalContent(val)}
                   onBlur={() => updateChapter({ content: localContent })}
                   readOnly={isGenerating}
                   className={`w-full h-full text-lg md:text-2xl font-serif text-[#555555] leading-[1.6] md:leading-[1.8] bg-transparent outline-none resize-none ${isGenerating ? 'opacity-70 cursor-not-allowed' : ''}`}
@@ -2687,10 +2796,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
               <div className="pt-4 border-t border-gray-100">
                 <label className="text-sm font-medium text-gray-700 mb-2 block">Hoặc tự viết định hướng:</label>
                 <div className="flex gap-2">
-                  <input
+                  <DebouncedInput
                     type="text"
                     value={customDirection}
-                    onChange={(e) => setCustomDirection(e.target.value)}
+                    onChange={(val: string) => setCustomDirection(val)}
                     placeholder="Nhập định hướng của bạn..."
                     className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:border-[#F9C6D4] transition-colors text-sm"
                   />
@@ -2729,9 +2838,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 block">Tại sao bạn muốn tạo lại?</label>
-                <textarea
+                <DebouncedTextarea
                   value={feedbackInput.reason}
-                  onChange={(e) => setFeedbackInput(prev => ({ ...prev, reason: e.target.value }))}
+                  onChange={(val: string) => setFeedbackInput(prev => ({ ...prev, reason: val }))}
                   placeholder="Ví dụ: Nội dung chưa đúng ý, văn phong chưa mượt..."
                   className="w-full p-3 bg-pink-50 border border-pink-100 rounded-xl outline-none focus:border-[#F9C6D4] text-sm h-20 resize-none"
                 />
@@ -2739,9 +2848,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
               
               <div>
                 <label className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 block">Bạn muốn lần sau như thế nào?</label>
-                <textarea
+                <DebouncedTextarea
                   value={feedbackInput.improvement}
-                  onChange={(e) => setFeedbackInput(prev => ({ ...prev, improvement: e.target.value }))}
+                  onChange={(val: string) => setFeedbackInput(prev => ({ ...prev, improvement: val }))}
                   placeholder="Ví dụ: Hãy viết lãng mạn hơn, tập trung vào nhân vật A..."
                   className="w-full p-3 bg-pink-50 border border-pink-100 rounded-xl outline-none focus:border-[#F9C6D4] text-sm h-20 resize-none"
                 />
@@ -2749,9 +2858,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
               
               <div>
                 <label className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1 block">Hệ thống đã mắc những lỗi nào?</label>
-                <textarea
+                <DebouncedTextarea
                   value={feedbackInput.mistakes}
-                  onChange={(e) => setFeedbackInput(prev => ({ ...prev, mistakes: e.target.value }))}
+                  onChange={(val: string) => setFeedbackInput(prev => ({ ...prev, mistakes: val }))}
                   placeholder="Ví dụ: Lặp từ, sai tên nhân vật, nội dung bị cắt ngang..."
                   className="w-full p-3 bg-pink-50 border border-pink-100 rounded-xl outline-none focus:border-[#F9C6D4] text-sm h-20 resize-none"
                 />
@@ -2783,10 +2892,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             </p>
             <div className="space-y-4">
               <div className="relative">
-                <input
+                <DebouncedInput
                   type="number"
                   value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
+                  onChange={(val: string) => setTokenInput(val)}
                   placeholder="Ví dụ: 2000, 5000, 10000..."
                   className="w-full p-4 bg-pink-50 border border-pink-200 rounded-2xl outline-none focus:border-[#F9C6D4] transition-colors text-lg font-bold text-pink-900"
                 />
@@ -3183,18 +3292,18 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         <Ribbon size={32} fill="#D18E9B" fillOpacity={0.2} />
                       </div>
                       <label className="scrapbook-title">⸝⸝ ⧣₊˚ Tên tiểu thuyết ✦₊</label>
-                      <input 
+                      <DebouncedInput 
                         value={currentStory?.title || ''}
-                        onChange={(e) => updateStory({ title: e.target.value })}
+                        onChange={(val: string) => updateStory({ title: val })}
                         className="w-full scrapbook-input"
                       />
                     </div>
 
                     <div className="scrapbook-card">
                       <label className="scrapbook-title">⸝⸝ ⧣₊˚ Cốt truyện mở đầu ✦₊</label>
-                      <textarea 
+                      <DebouncedTextarea 
                         value={currentStory.plot}
-                        onChange={(e) => updateStory({ plot: e.target.value })}
+                        onChange={(val: string) => updateStory({ plot: val })}
                         className="w-full scrapbook-input h-24 resize-none"
                         placeholder="Nhập phần mở đầu cốt truyện..."
                       />
@@ -3203,35 +3312,59 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="scrapbook-card">
                         <label className="scrapbook-title">
-                          <Bot size={14} /> Nhân vật Bot
+                          <Bot size={14} /> Tên nhân vật Bot
                         </label>
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.botChar}
-                          onChange={(e) => updateStory({ botChar: e.target.value })}
+                          onChange={(val: string) => updateStory({ botChar: val })}
                           className="w-full scrapbook-input"
-                          placeholder="Tên, tính cách..."
+                          placeholder="Tên nhân vật Bot..."
                         />
                       </div>
                       <div className="scrapbook-card">
                         <label className="scrapbook-title">
-                          <User size={14} /> Nhân vật User
+                          <User size={14} /> Tên nhân vật User
                         </label>
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.userChar}
-                          onChange={(e) => updateStory({ userChar: e.target.value })}
+                          onChange={(val: string) => updateStory({ userChar: val })}
                           className="w-full scrapbook-input"
-                          placeholder="Tên, vai trò..."
+                          placeholder="Tên nhân vật User..."
                         />
                       </div>
                     </div>
 
                     <div className="scrapbook-card">
                       <label className="scrapbook-title">
+                        <Bot size={14} /> Chi tiết nhân vật {"{{char}}"} (Bot)
+                      </label>
+                      <DebouncedTextarea 
+                        value={currentStory.charDescription || ''}
+                        onChange={(val: string) => updateStory({ charDescription: val })}
+                        className="w-full scrapbook-input h-48 resize-none text-sm"
+                        placeholder="Nhập chi tiết nhân vật {{char}} bao gồm ngoại hình, tính cách, phản ứng trong mọi tình huống, sở thích, cảm giác, không thích, quốc tịch..."
+                      />
+                    </div>
+
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">
+                        <User size={14} /> Chi tiết nhân vật {"{{user}}"} (User)
+                      </label>
+                      <DebouncedTextarea 
+                        value={currentStory.userDescription || ''}
+                        onChange={(val: string) => updateStory({ userDescription: val })}
+                        className="w-full scrapbook-input h-40 resize-none text-sm"
+                        placeholder="Nhập chi tiết nhân vật {{user}} bao gồm tính cách + ngoại hình..."
+                      />
+                    </div>
+
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">
                         <Flower2 size={14} /> Quốc tịch & Văn hóa (Quan trọng)
                       </label>
-                      <input 
+                      <DebouncedInput 
                         value={currentStory.nationality || ''}
-                        onChange={(e) => updateStory({ nationality: e.target.value })}
+                        onChange={(val: string) => updateStory({ nationality: val })}
                         className="w-full scrapbook-input"
                         placeholder="VD: Nhật Bản, Trung Quốc, Hàn Quốc..."
                       />
@@ -3245,33 +3378,33 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         <Clock size={14} /> Thời gian & Bối cảnh
                       </label>
                       <div className="grid grid-cols-2 gap-2">
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.currentTime || ''}
-                          onChange={(e) => updateStory({ currentTime: e.target.value })}
+                          onChange={(val: string) => updateStory({ currentTime: val })}
                           className="w-full scrapbook-input"
                           placeholder="Giờ hiện tại..."
                         />
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.currentDate || ''}
-                          onChange={(e) => updateStory({ currentDate: e.target.value })}
+                          onChange={(val: string) => updateStory({ currentDate: val })}
                           className="w-full scrapbook-input"
                           placeholder="Ngày/Tháng/Năm..."
                         />
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.weather || ''}
-                          onChange={(e) => updateStory({ weather: e.target.value })}
+                          onChange={(val: string) => updateStory({ weather: val })}
                           className="w-full scrapbook-input"
                           placeholder="Thời tiết..."
                         />
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.temperature || ''}
-                          onChange={(e) => updateStory({ temperature: e.target.value })}
+                          onChange={(val: string) => updateStory({ temperature: val })}
                           className="w-full scrapbook-input"
                           placeholder="Nhiệt độ..."
                         />
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.season || ''}
-                          onChange={(e) => updateStory({ season: e.target.value })}
+                          onChange={(val: string) => updateStory({ season: val })}
                           className="w-full scrapbook-input"
                           placeholder="Mùa..."
                         />
@@ -3283,15 +3416,15 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         <Heart size={14} /> Tiến độ Tình cảm
                       </label>
                       <div className="space-y-2">
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.loveProgress || ''}
-                          onChange={(e) => updateStory({ loveProgress: e.target.value })}
+                          onChange={(val: string) => updateStory({ loveProgress: val })}
                           className="w-full scrapbook-input"
                           placeholder="Tiến độ tình yêu..."
                         />
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.loveDevelopment || ''}
-                          onChange={(e) => updateStory({ loveDevelopment: e.target.value })}
+                          onChange={(val: string) => updateStory({ loveDevelopment: val })}
                           className="w-full scrapbook-input"
                           placeholder="Tiến độ phát triển tình cảm..."
                         />
@@ -3300,9 +3433,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
                     <div className="scrapbook-card">
                       <label className="scrapbook-title">⸝⸝ ⧣₊˚ Phong cách viết / Prompt ✦₊</label>
-                      <textarea 
+                      <DebouncedTextarea 
                         value={currentStory.prompt}
-                        onChange={(e) => updateStory({ prompt: e.target.value })}
+                        onChange={(val: string) => updateStory({ prompt: val })}
                         className="w-full scrapbook-input h-20 resize-none"
                         placeholder="VD: Viết theo ngôi thứ nhất, giọng văn u buồn..."
                       />
@@ -3338,9 +3471,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       <label className="scrapbook-title">
                         Ghi nhớ tóm tắt (Memory)
                       </label>
-                      <textarea 
+                      <DebouncedTextarea 
                         value={currentStory.memory || ''}
-                        onChange={(e) => updateStory({ memory: e.target.value })}
+                        onChange={(val: string) => updateStory({ memory: val })}
                         className="w-full scrapbook-input h-24 resize-none"
                         placeholder="Dán tóm tắt các chương trước vào đây..."
                       />
@@ -3350,9 +3483,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       <label className="scrapbook-title">
                         Bộ nhớ Nhân vật & NPC
                       </label>
-                      <textarea 
+                      <DebouncedTextarea 
                         value={currentStory.characterMemory || ''}
-                        onChange={(e) => updateStory({ characterMemory: e.target.value })}
+                        onChange={(val: string) => updateStory({ characterMemory: val })}
                         className="w-full scrapbook-input h-24 resize-none"
                         placeholder="Lưu trữ thông tin chi tiết về các nhân vật..."
                       />
@@ -3378,76 +3511,109 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         </div>
                       </div>
 
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-[#D18E9B] flex items-center gap-2">
+                            <RefreshCw size={16} /> Tự động cập nhật sau mỗi chương
+                          </span>
+                        </div>
+                        <div 
+                          className="scrapbook-toggle"
+                          onClick={() => updateStory({ autoUpdateSmartMemory: !currentStory.autoUpdateSmartMemory })}
+                        >
+                          <div className={`scrapbook-toggle-bg ${currentStory.autoUpdateSmartMemory ? 'active' : ''}`} />
+                          <div className={`scrapbook-toggle-circle ${currentStory.autoUpdateSmartMemory ? 'active' : ''}`} />
+                        </div>
+                      </div>
+
                       {currentStory.useSmartMemory && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                           <div className="space-y-2">
                             <label className="text-[11px] font-bold text-[#D18E9B] uppercase tracking-wider">★── Lời nhắc từ Trợ lý (Briefing)</label>
-                            <textarea 
+                            <DebouncedTextarea 
                               value={currentStory.briefingForNextChapter || ''}
-                              onChange={(e) => updateStory({ briefingForNextChapter: e.target.value })}
+                              onChange={(val: string) => updateStory({ briefingForNextChapter: val })}
                               className="w-full scrapbook-input h-24 resize-none text-xs"
                               placeholder="API phụ sẽ tóm tắt 'linh hồn' chương vừa rồi ở đây..."
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Danh sách sự kiện</label>
-                            <textarea 
+                            <DebouncedTextarea 
                               value={currentStory.eventList || ''}
-                              onChange={(e) => updateStory({ eventList: e.target.value })}
+                              onChange={(val: string) => updateStory({ eventList: val })}
                               className="w-full scrapbook-input h-24 resize-none text-xs"
                               placeholder="Các sự kiện quan trọng đã xảy ra..."
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Tiến triển nhân vật</label>
-                            <textarea 
+                            <DebouncedTextarea 
                               value={currentStory.relationshipProgress || ''}
-                              onChange={(e) => updateStory({ relationshipProgress: e.target.value })}
+                              onChange={(val: string) => updateStory({ relationshipProgress: val })}
                               className="w-full scrapbook-input h-24 resize-none text-xs"
                               placeholder="Mối quan hệ, lịch sử tương tác, lý do tiến triển..."
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Tóm tắt theo ngày</label>
-                            <textarea 
+                            <DebouncedTextarea 
                               value={currentStory.dailySummary || ''}
-                              onChange={(e) => updateStory({ dailySummary: e.target.value })}
+                              onChange={(val: string) => updateStory({ dailySummary: val })}
                               className="w-full scrapbook-input h-24 resize-none text-xs"
                               placeholder="Diễn biến quan trọng của từng ngày..."
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Theo dõi tình huống</label>
-                            <textarea 
+                            <DebouncedTextarea 
                               value={currentStory.situationTracking || ''}
-                              onChange={(e) => updateStory({ situationTracking: e.target.value })}
+                              onChange={(val: string) => updateStory({ situationTracking: val })}
                               className="w-full scrapbook-input h-24 resize-none text-xs"
                               placeholder="Các tình huống đang diễn ra hoặc đã xử lý..."
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Những điều cần tránh</label>
-                            <textarea 
+                            <DebouncedTextarea 
                               value={currentStory.thingsToAvoid || ''}
-                              onChange={(e) => updateStory({ thingsToAvoid: e.target.value })}
+                              onChange={(val: string) => updateStory({ thingsToAvoid: val })}
                               className="w-full scrapbook-input h-24 resize-none text-xs"
                               placeholder="Các tình tiết đã dùng, không nên lặp lại..."
                             />
                           </div>
                           <div className="space-y-2">
                             <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Thông tin chương gần nhất</label>
-                            <textarea 
+                            <DebouncedTextarea 
                               value={currentStory.currentChapterInfo || ''}
-                              onChange={(e) => updateStory({ currentChapterInfo: e.target.value })}
+                              onChange={(val: string) => updateStory({ currentChapterInfo: val })}
                               className="w-full scrapbook-input h-24 resize-none text-xs"
                               placeholder="Bối cảnh và điểm kết thúc chương trước..."
                             />
                           </div>
                           <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Sự kiện đang dở dang (Ongoing)</label>
+                            <DebouncedTextarea 
+                              value={currentStory.ongoingEvents || ''}
+                              onChange={(val: string) => updateStory({ ongoingEvents: val })}
+                              className="w-full scrapbook-input h-40 resize-none text-xs"
+                              placeholder="Các sự kiện đang diễn ra dở dang từ chương trước (API phụ cập nhật)..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Tiến độ sắp xếp (50 nội dung)</label>
+                            <DebouncedTextarea 
+                              value={currentStory.progressSummary || ''}
+                              onChange={(val: string) => updateStory({ progressSummary: val })}
+                              className="w-full scrapbook-input h-64 resize-none text-xs"
+                              placeholder="Tóm tắt 50 ý chính từ đầu đến hiện tại (API phụ cập nhật)..."
+                            />
+                          </div>
+                          <div className="space-y-2">
                             <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Bộ nhớ NPC & Nhân vật phụ</label>
-                            <textarea 
+                            <DebouncedTextarea 
                               value={currentStory.npcMemory || ''}
-                              onChange={(e) => updateStory({ npcMemory: e.target.value })}
+                              onChange={(val: string) => updateStory({ npcMemory: val })}
                               className="w-full scrapbook-input h-24 resize-none text-xs"
                               placeholder="Vai trò, mối quan hệ và góc nhìn của NPC..."
                             />
@@ -3472,19 +3638,19 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="scrapbook-card">
                         <label className="scrapbook-title">Giới hạn ký tự</label>
-                        <input 
+                        <DebouncedInput 
                           type="number"
                           value={currentStory.charLimit}
-                          onChange={(e) => updateStory({ charLimit: parseInt(e.target.value) })}
+                          onChange={(val: string) => updateStory({ charLimit: parseInt(val) })}
                           className="w-full scrapbook-input"
                         />
                       </div>
                       <div className="scrapbook-card">
                         <label className="scrapbook-title">Giới hạn Token</label>
-                        <input 
+                        <DebouncedInput 
                           type="number"
                           value={currentStory.tokenLimit}
-                          onChange={(e) => updateStory({ tokenLimit: parseInt(e.target.value) })}
+                          onChange={(val: string) => updateStory({ tokenLimit: parseInt(val) })}
                           className="w-full scrapbook-input"
                         />
                       </div>
@@ -3492,10 +3658,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
                     <div className="scrapbook-card">
                       <label className="scrapbook-title">Mục tiêu ký tự</label>
-                      <input 
+                      <DebouncedInput 
                         type="number"
                         value={currentStory.targetCharCount || ''}
-                        onChange={(e) => updateStory({ targetCharCount: parseInt(e.target.value) })}
+                        onChange={(val: string) => updateStory({ targetCharCount: parseInt(val) })}
                         className="w-full scrapbook-input"
                         placeholder="Không bắt buộc"
                       />
@@ -3504,9 +3670,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     <div className="scrapbook-card">
                       <label className="scrapbook-title">Hình nền ứng dụng</label>
                       <div className="flex gap-2">
-                        <input 
+                        <DebouncedInput 
                           value={currentStory.background}
-                          onChange={(e) => updateStory({ background: e.target.value })}
+                          onChange={(val: string) => updateStory({ background: val })}
                           className="flex-1 scrapbook-input"
                           placeholder="Dán link ảnh nền..."
                         />
@@ -3523,10 +3689,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 <div className={`space-y-6 ${activeSettingsTab === 'api' ? 'block' : 'hidden'}`}>
                   <div className="scrapbook-card">
                       <label className="scrapbook-title">API Key (Proxy/Direct)</label>
-                      <input 
+                      <DebouncedInput 
                         type="password"
                         value={apiSettings.apiKey}
-                        onChange={(e) => setApiSettings({ ...apiSettings, apiKey: e.target.value })}
+                        onChange={(val: string) => setApiSettings({ ...apiSettings, apiKey: val })}
                         className="w-full scrapbook-input"
                         placeholder="sk-..."
                       />
@@ -3534,9 +3700,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
                     <div className="scrapbook-card">
                       <label className="scrapbook-title">Proxy Endpoint</label>
-                      <input 
+                      <DebouncedInput 
                         value={apiSettings.proxyEndpoint}
-                        onChange={(e) => setApiSettings({ ...apiSettings, proxyEndpoint: e.target.value })}
+                        onChange={(val: string) => setApiSettings({ ...apiSettings, proxyEndpoint: val })}
                         className="w-full scrapbook-input"
                         placeholder="https://api.openai.com/v1/chat/completions"
                       />
@@ -3544,10 +3710,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
                     <div className="scrapbook-card">
                       <label className="scrapbook-title">Số lượng ký tự mong muốn</label>
-                      <input 
+                      <DebouncedInput 
                         type="number"
                         value={apiSettings.nextCharCount || ''}
-                        onChange={(e) => setApiSettings({ ...apiSettings, nextCharCount: parseInt(e.target.value) || undefined })}
+                        onChange={(val: string) => setApiSettings({ ...apiSettings, nextCharCount: parseInt(val) || undefined })}
                         className="w-full scrapbook-input"
                         placeholder="Ví dụ: 1000"
                       />
@@ -3555,9 +3721,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
                     <div className="scrapbook-card">
                       <label className="scrapbook-title">Ký tự bắt đầu (Next Chars)</label>
-                      <input 
+                      <DebouncedInput 
                         value={apiSettings.nextChars || ''}
-                        onChange={(e) => setApiSettings({ ...apiSettings, nextChars: e.target.value })}
+                        onChange={(val: string) => setApiSettings({ ...apiSettings, nextChars: val })}
                         className="w-full scrapbook-input"
                         placeholder="Ví dụ: 'Cô ấy nói: '"
                       />
@@ -3602,11 +3768,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                           ))
                         )}
                       </div>
-                      <input 
+                      <DebouncedInput 
                         type="text" 
                         placeholder="Hoặc nhập tên Model thủ công..." 
                         value={apiSettings.model} 
-                        onChange={(e) => setApiSettings({ ...apiSettings, model: e.target.value })} 
+                        onChange={(val: string) => setApiSettings({ ...apiSettings, model: val })} 
                         className="w-full scrapbook-input text-sm mt-2" 
                       />
                     </div>
@@ -3627,10 +3793,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       
                       <div className="space-y-2">
                         <label className="text-[10px] font-bold text-[#999999] uppercase">Hoặc nhập số Token cụ thể</label>
-                        <input 
+                        <DebouncedInput 
                           type="number"
                           value={apiSettings.maxTokens || ''}
-                          onChange={(e) => setApiSettings({ ...apiSettings, maxTokens: parseInt(e.target.value) || 0, isUnlimited: false })}
+                          onChange={(val: string) => setApiSettings({ ...apiSettings, maxTokens: parseInt(val) || 0, isUnlimited: false })}
                           className="w-full scrapbook-input text-sm"
                           placeholder="Ví dụ: 1000000"
                         />
@@ -3682,9 +3848,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       <label className="scrapbook-title">
                         <ListOrdered size={14} /> Tiến độ sắp xếp (50 nội dung)
                       </label>
-                      <textarea 
+                      <DebouncedTextarea 
                         value={currentStory.progressSummary || ''}
-                        onChange={(e) => updateStory({ progressSummary: e.target.value })}
+                        onChange={(val: string) => updateStory({ progressSummary: val })}
                         className="w-full scrapbook-input h-40 resize-none text-xs"
                         placeholder="Sắp xếp 50 nội dung từ đầu đến hiện tại, mỗi ý 150-200 ký tự..."
                       />
@@ -3708,10 +3874,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                           <div className="space-y-2">
                             <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">API Key (Phụ)</label>
-                            <input 
+                            <DebouncedInput 
                               type="password"
                               value={secondaryApiSettings.apiKey}
-                              onChange={(e) => setSecondaryApiSettings({ ...secondaryApiSettings, apiKey: e.target.value })}
+                              onChange={(val: string) => setSecondaryApiSettings({ ...secondaryApiSettings, apiKey: val })}
                               className="w-full scrapbook-input text-sm"
                               placeholder="sk-..."
                             />
@@ -3719,9 +3885,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
                           <div className="space-y-2">
                             <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">Proxy Endpoint (Phụ)</label>
-                            <input 
+                            <DebouncedInput 
                               value={secondaryApiSettings.proxyEndpoint}
-                              onChange={(e) => setSecondaryApiSettings({ ...secondaryApiSettings, proxyEndpoint: e.target.value })}
+                              onChange={(val: string) => setSecondaryApiSettings({ ...secondaryApiSettings, proxyEndpoint: val })}
                               className="w-full scrapbook-input text-sm"
                               placeholder="https://api.openai.com/v1/chat/completions"
                             />
@@ -3802,11 +3968,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                                 ))
                               )}
                             </div>
-                            <input 
+                            <DebouncedInput 
                               type="text" 
                               placeholder="Hoặc nhập tên Model phụ thủ công..." 
                               value={secondaryApiSettings.model} 
-                              onChange={(e) => setSecondaryApiSettings({ ...secondaryApiSettings, model: e.target.value })} 
+                              onChange={(val: string) => setSecondaryApiSettings({ ...secondaryApiSettings, model: val })} 
                               className="w-full scrapbook-input text-sm" 
                             />
                           </div>
@@ -3832,18 +3998,18 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       <div className="space-y-4">
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">Tên Prompt</label>
-                          <input 
+                          <DebouncedInput 
                             value={newPromptName}
-                            onChange={(e) => setNewPromptName(e.target.value)}
+                            onChange={(val: string) => setNewPromptName(val)}
                             className="w-full scrapbook-input text-sm"
                             placeholder="VD: Phong cách u sầu"
                           />
                         </div>
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">Nội dung Prompt</label>
-                          <textarea 
+                          <DebouncedTextarea 
                             value={newPromptContent}
-                            onChange={(e) => setNewPromptContent(e.target.value)}
+                            onChange={(val: string) => setNewPromptContent(val)}
                             className="w-full scrapbook-input text-sm h-32 resize-none"
                             placeholder="Nhập hướng dẫn chi tiết cho AI..."
                           />
@@ -5159,6 +5325,21 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         )}
       </AnimatePresence>
 
+      {/* Inner Thoughts Modal */}
+      <AnimatePresence>
+        {showInnerThoughts && (
+          <KikokoInnerThoughts 
+            onClose={() => setShowInnerThoughts(false)}
+            apiSettings={apiSettings}
+            secondaryApiSettings={secondaryApiSettings}
+            currentStory={currentStory}
+            currentChapter={currentChapter}
+            getCompletionUrl={getCompletionUrl}
+            updateStory={updateStory}
+          />
+        )}
+      </AnimatePresence>
+
       {/* YouTube Modal */}
       <AnimatePresence>
         {showYouTube && (
@@ -5171,6 +5352,20 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             updateStory={updateStory}
             galleryBackground={galleryBackground}
             getCompletionUrl={getCompletionUrl}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* NPC Novel Writing Modal */}
+      <AnimatePresence>
+        {showNPCNovelWriting && (
+          <KikokoNPCNovelWriting 
+            onClose={() => setShowNPCNovelWriting(false)}
+            apiSettings={apiSettings}
+            secondaryApiSettings={secondaryApiSettings}
+            currentStory={currentStory}
+            getCompletionUrl={getCompletionUrl}
+            updateStory={updateStory}
           />
         )}
       </AnimatePresence>
