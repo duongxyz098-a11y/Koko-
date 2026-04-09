@@ -2234,7 +2234,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
               <div className="space-y-1">
                 <p className="text-[#DB2777] font-bold text-sm animate-pulse">{LOADING_MESSAGES[loadingMessageIdx]}</p>
                 <p className="text-[10px] text-stone-400">
-                  {isApiFinished ? 'Đang hoàn tất...' : (countdownTime !== null ? `Đang dệt mộng... (Còn lại: ${Math.floor(countdownTime / 60)}:${(countdownTime % 60).toString().padStart(2, '0')})` : 'Đang khởi tạo kết nối...')}
+                  {isApiFinished ? <span>Đang hoàn tất...</span> : (countdownTime !== null ? <span>Đang dệt mộng... (Còn lại: {Math.floor(countdownTime / 60)}:{(countdownTime % 60).toString().padStart(2, '0')})</span> : <span>Đang khởi tạo kết nối...</span>)}
                 </p>
                 {isGenerating && apiSettings.nextCharCount && (
                   <div className="w-full space-y-1">
@@ -2363,7 +2363,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             disabled={isGenerating}
             className={`p-2 rounded-lg px-4 text-sm font-bold flex items-center gap-2 shadow-sm transition-all ${isGenerating ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#F9C6D4] text-white active:scale-95'}`}
           >
-            {isEditing ? <><Save size={16} /> Lưu</> : <><Sparkles size={16} /> Sửa</>}
+            {isEditing ? <><Save size={16} /> <span>Lưu</span></> : <><Sparkles size={16} /> <span>Sửa</span></>}
           </button>
         </div>
       </div>
@@ -2634,7 +2634,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             disabled={isSummarizing}
             className="text-xs font-bold text-[#F9C6D4] hover:text-[#F9C6D4]/80 transition-colors"
           >
-            {isSummarizing ? 'Đang tóm tắt...' : 'Tóm tắt'}
+            {isSummarizing ? <span>Đang tóm tắt...</span> : <span>Tóm tắt</span>}
           </button>
           <button 
             onClick={() => setChapterToDelete(currentChapterIndex)}
@@ -2952,7 +2952,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                   disabled={isSummarizing}
                   className="flex-1 py-3 bg-[#F9C6D4] text-white rounded-xl font-bold hover:bg-[#F9C6D4]/90 transition-colors disabled:opacity-50"
                 >
-                  {isSummarizing ? 'Đang xử lý...' : (summaryConfig.type === 'auto' ? 'Lưu cấu hình tự động' : 'Bắt đầu tóm tắt')}
+                  {isSummarizing ? <span>Đang xử lý...</span> : (summaryConfig.type === 'auto' ? <span>Lưu cấu hình tự động</span> : <span>Bắt đầu tóm tắt</span>)}
                 </button>
                 <button 
                   onClick={() => setShowSummaryConfigModal(false)}
@@ -3072,7 +3072,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                   disabled={isSummarizing}
                   className="w-full py-3 bg-purple-500 text-white rounded-xl font-bold hover:bg-purple-600 shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isSummarizing ? 'Đang gom...' : 'Gom tóm tắt tổng thể'}
+                  {isSummarizing ? <span>Đang gom...</span> : <span>Gom tóm tắt tổng thể</span>}
                 </button>
                 <button 
                   onClick={() => {
@@ -3156,19 +3156,19 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     onClick={() => setActiveSettingsTab('general')}
                     className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'general' ? 'text-[#D18E9B]' : 'text-[#777777]'}`}
                   >
-                    Cài đặt chung
+                    <span>Cài đặt chung</span>
                   </button>
                   <button 
                     onClick={() => setActiveSettingsTab('api')}
                     className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'api' ? 'text-[#D18E9B]' : 'text-[#777777]'}`}
                   >
-                    Hệ thống API
+                    <span>Hệ thống API</span>
                   </button>
                   <button 
                     onClick={() => setActiveSettingsTab('system')}
                     className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'system' ? 'text-[#D18E9B]' : 'text-[#777777]'}`}
                   >
-                    SYSTEM
+                    <span>SYSTEM</span>
                   </button>
                 </div>
                 <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-white rounded-full transition-colors flex-shrink-0">
@@ -3176,10 +3176,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 </button>
               </div>
               
-              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
-                {activeSettingsTab === 'general' ? (
-                  <div className="space-y-6">
-                    <div className="scrapbook-card">
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                <div className={`space-y-6 ${activeSettingsTab === 'general' ? 'block' : 'hidden'}`}>
+                  <div className="scrapbook-card">
                       <div className="absolute -top-3 -left-3 text-[#D18E9B] rotate-[-15deg]">
                         <Ribbon size={32} fill="#D18E9B" fillOpacity={0.2} />
                       </div>
@@ -3520,9 +3519,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       </div>
                     </div>
                   </div>
-                ) : activeSettingsTab === 'api' ? (
-                  <div className="space-y-6">
-                    <div className="scrapbook-card">
+
+                <div className={`space-y-6 ${activeSettingsTab === 'api' ? 'block' : 'hidden'}`}>
+                  <div className="scrapbook-card">
                       <label className="scrapbook-title">API Key (Proxy/Direct)</label>
                       <input 
                         type="password"
@@ -3575,11 +3574,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                           {isFetchingModels ? (
                             <>
                               <div className="w-2 h-2 border border-gray-400 border-t-transparent rounded-full animate-spin" />
-                              Đang tải...
+                              <span>Đang tải...</span>
                             </>
                           ) : (
                             <>
-                              <Sparkles size={10} /> Làm mới
+                              <Sparkles size={10} /> <span>Làm mới</span>
                             </>
                           )}
                         </button>
@@ -3781,7 +3780,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                                 disabled={isFetchingSecondaryModels}
                                 className={`text-[10px] font-bold flex items-center gap-1 transition-all ${isFetchingSecondaryModels ? 'text-gray-400' : 'text-[#D18E9B] hover:underline'}`}
                               >
-                                {isFetchingSecondaryModels ? 'Đang tải...' : 'Làm mới'}
+                                {isFetchingSecondaryModels ? <span>Đang tải...</span> : <span>Làm mới</span>}
                               </button>
                             </div>
                             <div className="flex overflow-x-auto gap-3 pb-2 custom-scrollbar snap-x">
@@ -3815,9 +3814,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       )}
                     </div>
                   </div>
-                ) : (
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center">
+
+                <div className={`space-y-6 ${activeSettingsTab === 'system' ? 'block' : 'hidden'}`}>
+                  <div className="flex justify-between items-center">
                       <h3 className="scrapbook-title text-lg">Quản lý System Prompt</h3>
                       <button 
                         onClick={clearPromptInputs}
@@ -3854,7 +3853,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                           className="w-full py-3 bg-[#D18E9B] text-white rounded-xl font-bold shadow-sm hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
                         >
                           <Save size={18} />
-                          {editingPromptId ? 'Cập nhật Prompt' : 'Lưu vào trang trưng bày'}
+                          {editingPromptId ? <span>Cập nhật Prompt</span> : <span>Lưu vào trang trưng bày</span>}
                         </button>
                       </div>
                     </div>
@@ -3923,7 +3922,6 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       </div>
                     </div>
                   </div>
-                )}
               </div>
 
               <div className="p-6 bg-[#FAF9F6] border-t border-[#EACFD5]">
@@ -3931,7 +3929,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                   onClick={() => setShowSettings(false)}
                   className="w-full py-4 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-lg hover:scale-[1.02] transition-transform"
                 >
-                  {activeSettingsTab === 'general' ? 'Lưu cài đặt' : activeSettingsTab === 'api' ? 'Lưu hệ thống API' : 'Hoàn tất'}
+                  <span>{activeSettingsTab === 'general' ? 'Lưu cài đặt' : activeSettingsTab === 'api' ? 'Lưu hệ thống API' : 'Hoàn tất'}</span>
                 </button>
               </div>
             </motion.div>
@@ -3982,8 +3980,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       <h3 className="text-xl font-serif font-bold text-[#F9C6D4] animate-pulse">Đang triệu tập độc giả...</h3>
                       <p className="text-sm text-stone-400">
                         {generationProgress.total > 0 
-                          ? `Đã triệu tập ${generationProgress.current}/${generationProgress.total} độc giả...`
-                          : 'Hàng trăm độc giả đang chuẩn bị vào phòng thảo luận'
+                          ? <span>Đã triệu tập {generationProgress.current}/{generationProgress.total} độc giả...</span>
+                          : <span>Hàng trăm độc giả đang chuẩn bị vào phòng thảo luận</span>
                         }
                       </p>
                       <div className="w-64 h-2 bg-pink-100 rounded-full overflow-hidden mx-auto mt-4">
@@ -4237,7 +4235,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 disabled={isGenerating}
                 className="w-full py-4 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-lg hover:scale-[1.02] transition-transform mt-4 disabled:opacity-50"
               >
-                {isGenerating ? 'Đang xử lý dữ liệu lớn...' : 'Bắt đầu tương tác'}
+                {isGenerating ? <span>Đang xử lý dữ liệu lớn...</span> : <span>Bắt đầu tương tác</span>}
               </button>
             </motion.div>
           </motion.div>
@@ -5246,7 +5244,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         className="px-8 py-3 bg-white border-2 border-pink-200 text-pink-500 rounded-full font-bold hover:bg-pink-50 transition-colors flex items-center gap-2 disabled:opacity-50"
                       >
                         {isGeneratingIntro ? <RefreshCw size={20} className="animate-spin" /> : <Sparkles size={20} />}
-                        {stories.find(s => s.id === introStoryId)?.intro ? 'Cập nhật Intro' : 'Tạo Intro AI'}
+                        {stories.find(s => s.id === introStoryId)?.intro ? <span>Cập nhật Intro</span> : <span>Tạo Intro AI</span>}
                       </button>
                     </div>
                   </div>
