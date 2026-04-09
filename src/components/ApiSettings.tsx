@@ -52,6 +52,55 @@ const HeartBullet = () => (
   </svg>
 );
 
+const HandDrawnBow = ({ className = "" }: { className?: string }) => (
+  <div className={`absolute pointer-events-none select-none ${className}`} style={{ width: '45px', height: 'auto' }}>
+    <svg viewBox="0 0 100 60" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-auto drop-shadow-sm opacity-90">
+      {/* Hand-drawn style bow with slight asymmetry and watercolor feel */}
+      <path 
+        d="M50 30 C 45 10, 10 5, 5 30 C 5 50, 40 55, 50 35" 
+        stroke="#F9C6D4" 
+        strokeWidth="3" 
+        strokeLinecap="round" 
+        fill="#F9C6D4" 
+        fillOpacity="0.2"
+      />
+      <path 
+        d="M50 30 C 55 10, 90 5, 95 30 C 95 50, 60 55, 50 35" 
+        stroke="#F9C6D4" 
+        strokeWidth="3" 
+        strokeLinecap="round" 
+        fill="#F9C6D4" 
+        fillOpacity="0.2"
+      />
+      {/* Ribbons */}
+      <path 
+        d="M48 35 C 40 45, 35 55, 38 58" 
+        stroke="#F9C6D4" 
+        strokeWidth="2.5" 
+        strokeLinecap="round" 
+        fill="none"
+      />
+      <path 
+        d="M52 35 C 60 45, 65 55, 62 58" 
+        stroke="#F9C6D4" 
+        strokeWidth="2.5" 
+        strokeLinecap="round" 
+        fill="none"
+      />
+      {/* Center knot */}
+      <path 
+        d="M45 28 Q 50 22, 55 28 Q 58 32, 50 38 Q 42 32, 45 28" 
+        fill="#F9C6D4" 
+        stroke="#F9C6D4" 
+        strokeWidth="1"
+      />
+      {/* Pencil sketch lines for texture */}
+      <path d="M15 25 Q 25 15, 40 25" stroke="#F472B6" strokeWidth="0.5" strokeOpacity="0.4" fill="none" />
+      <path d="M85 25 Q 75 15, 60 25" stroke="#F472B6" strokeWidth="0.5" strokeOpacity="0.4" fill="none" />
+    </svg>
+  </div>
+);
+
 const BugIcon = ({ size = 24, color = "#F9C6D4", className = "" }: any) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M8 2l1.5 2M16 2l-1.5 2M12 4v16M8 10h8M7 14h10M8 18h8M12 4a4 4 0 0 0-4 4v2a4 4 0 0 0 8 0V8a4 4 0 0 0-4-4z" fill={color} fillOpacity="0.5" />
@@ -400,7 +449,8 @@ export default function ApiSettings({
           </div>
         ) : (
           <div className="p-6 space-y-6 animate-in fade-in max-w-2xl mx-auto">
-            <div className="space-y-2">
+            <div className="space-y-2 relative">
+              <HandDrawnBow className="-top-4 -right-2 rotate-12" />
               <label className="text-sm font-medium text-gray-700">API Endpoint (Proxy / Official)</label>
               <input 
                 type="text" 
@@ -423,7 +473,8 @@ export default function ApiSettings({
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 relative">
+              <HandDrawnBow className="-top-5 -right-3 -rotate-6" />
               <label className="text-sm font-medium text-gray-700">Tên Model</label>
               <input 
                 type="text" 

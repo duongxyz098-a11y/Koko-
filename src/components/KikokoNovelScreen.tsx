@@ -31,7 +31,10 @@ import {
   Candy,
   MessageSquare,
   Hourglass,
-  Play
+  Play,
+  Ribbon,
+  Clock,
+  ListOrdered
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { compressImage } from '../utils/imageUtils';
@@ -111,6 +114,26 @@ interface KikokoStory {
   selectedStyles?: string[];
   memory?: string;
   characterMemory?: string;
+  // New Smart Memory Fields
+  eventList?: string;
+  relationshipProgress?: string;
+  dailySummary?: string;
+  situationTracking?: string;
+  thingsToAvoid?: string;
+  currentChapterInfo?: string;
+  npcMemory?: string;
+  briefingForNextChapter?: string;
+  useSmartMemory?: boolean;
+  
+  // New Fields for User Request
+  currentTime?: string;
+  weather?: string;
+  temperature?: string;
+  season?: string;
+  currentDate?: string;
+  loveProgress?: string;
+  loveDevelopment?: string;
+  
   style: string;
   chapters: KikokoChapter[];
   background: string;
@@ -125,6 +148,7 @@ interface KikokoStory {
   autoSummarizeInterval?: number;
   intro?: string;
   cover?: string;
+  nationality?: string;
 }
 
 const LOADING_MESSAGES = [
@@ -343,6 +367,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [customNpcCount, setCustomNpcCount] = useState('500');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [streamingContent, setStreamingContent] = useState('');
+  const [pendingGeneratedContent, setPendingGeneratedContent] = useState<string | null>(null);
+  const [pendingChapterData, setPendingChapterData] = useState<{content: string, npcComments: any[], index: number} | null>(null);
+  const [isPendingSave, setIsPendingSave] = useState(false);
   const [visibleCommentsCount, setVisibleCommentsCount] = useState(50);
   const [estimatedTime, setEstimatedTime] = useState<number | null>(null);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
@@ -394,20 +421,6 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [readingStoryId, setReadingStoryId] = useState<string | null>(null);
   const [showReaderDrawer, setShowReaderDrawer] = useState(false);
 
-  const [secondaryApiSettings, setSecondaryApiSettings] = useState(() => {
-    const saved = localStorage.getItem('kikoko_secondary_api_settings');
-    return saved ? JSON.parse(saved) : {
-      enabled: false,
-      apiKey: '',
-      proxyEndpoint: 'https://api.openai.com/v1/chat/completions',
-      model: 'gpt-3.5-turbo'
-    };
-  });
-
-  useEffect(() => {
-    localStorage.setItem('kikoko_secondary_api_settings', JSON.stringify(secondaryApiSettings));
-  }, [secondaryApiSettings]);
-
   const [availableSecondaryModels, setAvailableSecondaryModels] = useState<string[]>([]);
   const [isFetchingSecondaryModels, setIsFetchingSecondaryModels] = useState(false);
 
@@ -432,10 +445,25 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       ]
     };
   });
+  const [secondaryApiSettings, setSecondaryApiSettings] = useState<ApiSettings>(() => {
+    const saved = localStorage.getItem('kikoko_secondary_api_settings');
+    return saved ? JSON.parse(saved) : {
+      enabled: false,
+      apiKey: '',
+      proxyEndpoint: 'https://api.openai.com/v1/chat/completions',
+      model: 'gpt-3.5-turbo',
+      maxTokens: 2000000,
+      timeout: 10,
+      isUnlimited: true,
+      generationDuration: 2,
+      systemPrompts: []
+    };
+  });
 
   useEffect(() => {
     localStorage.setItem('kikoko_api_settings', JSON.stringify(apiSettings));
-  }, [apiSettings]);
+    localStorage.setItem('kikoko_secondary_api_settings', JSON.stringify(secondaryApiSettings));
+  }, [apiSettings, secondaryApiSettings]);
 
   useEffect(() => {
     if (galleryBackground) {
@@ -598,7 +626,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
-    setStories([newStory, ...stories]);
+    setStories(prevStories => [newStory, ...prevStories]);
     
     // Save to IndexedDB
     await saveKikokoStory(newStory);
@@ -612,29 +640,168 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
   const updateStory = async (updates: Partial<KikokoStory>) => {
     if (!currentStoryId) return;
-    const updatedStories = stories.map(s => s.id === currentStoryId ? { ...s, ...updates, updatedAt: Date.now() } : s);
-    setStories(updatedStories);
-    const updatedStory = updatedStories.find(s => s.id === currentStoryId);
-    if (updatedStory) {
+    
+    setStories(prevStories => {
+      const updatedStories = prevStories.map(s => s.id === currentStoryId ? { ...s, ...updates, updatedAt: Date.now() } : s);
+      const updatedStory = updatedStories.find(s => s.id === currentStoryId);
+      
+      if (updatedStory) {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+        }
+        saveTimeoutRef.current = setTimeout(async () => {
+          // Save to IndexedDB
+          await saveKikokoStory(updatedStory);
+        }, 1000);
+      }
+      
+      return updatedStories;
+    });
+  };
+
+  const updateChapter = (updates: Partial<KikokoChapter>, index?: number) => {
+    if (!currentStoryId) return;
+    
+    setStories(prevStories => {
+      const storyIndex = prevStories.findIndex(s => s.id === currentStoryId);
+      if (storyIndex === -1) return prevStories;
+      
+      const story = prevStories[storyIndex];
+      const targetIndex = index !== undefined ? index : currentChapterIndex;
+      const newChapters = [...story.chapters];
+      const chapterToUpdate = newChapters[targetIndex];
+      if (!chapterToUpdate) return prevStories;
+      
+      // Backup current chapter content before updating
+      const backupChapter = { ...chapterToUpdate };
+      localStorage.setItem('lastDeletedOrUpdatedChapter', JSON.stringify(backupChapter));
+      
+      newChapters[targetIndex] = { ...chapterToUpdate, ...updates };
+      
+      const updatedStories = [...prevStories];
+      updatedStories[storyIndex] = { ...story, chapters: newChapters, updatedAt: Date.now() };
+      
+      // Trigger save
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
       saveTimeoutRef.current = setTimeout(async () => {
-        // Save to IndexedDB
-        await saveKikokoStory(updatedStory);
+        await saveKikokoStory(updatedStories[storyIndex]);
       }, 1000);
-    }
+      
+      return updatedStories;
+    });
   };
 
-  const updateChapter = (updates: Partial<KikokoChapter>, index?: number) => {
-    if (!currentStoryId || !currentStory) return;
-    const targetIndex = index !== undefined ? index : currentChapterIndex;
-    const newChapters = [...currentStory.chapters];
-    const chapterToUpdate = newChapters[targetIndex];
-    if (!chapterToUpdate) return;
+  const generateSmartMemory = async () => {
+    if (!currentStory) return;
     
-    newChapters[targetIndex] = { ...chapterToUpdate, ...updates };
-    updateStory({ chapters: newChapters });
+    const apiToUse = secondaryApiSettings.enabled ? secondaryApiSettings : apiSettings;
+    if (!apiToUse.apiKey) return;
+
+    try {
+      const lastChapter = currentStory.chapters[currentChapterIndex];
+      const recentChapters = currentStory.chapters.slice(Math.max(0, currentChapterIndex - 3), currentChapterIndex + 1);
+      const contextText = recentChapters.map(c => `--- ${c.title} ---\n${c.content}`).join('\n\n');
+
+      const prompt = `Bạn là hệ thống quản lý bộ nhớ thông minh cho tiểu thuyết "${currentStory.title}".
+      Nhiệm vụ của bạn là cập nhật các mục ghi nhớ sau khi chương truyện mới nhất vừa kết thúc.
+      
+      [NỘI DUNG CÁC CHƯƠNG GẦN NHẤT]
+      ${contextText}
+      
+      [THÔNG TIN BỘ NHỚ HIỆN TẠI]
+      - Quốc tịch: ${currentStory.nationality || 'Chưa xác định'}
+      - Thời gian: ${currentStory.currentTime || 'Chưa xác định'}
+      - Ngày: ${currentStory.currentDate || 'Chưa xác định'}
+      - Thời tiết: ${currentStory.weather || 'Chưa xác định'}
+      - Nhiệt độ: ${currentStory.temperature || 'Chưa xác định'}
+      - Mùa: ${currentStory.season || 'Chưa xác định'}
+      - Tiến độ tình yêu: ${currentStory.loveProgress || 'Chưa có'}
+      - Tiến độ phát triển tình cảm: ${currentStory.loveDevelopment || 'Chưa có'}
+      - Sự kiện: ${currentStory.eventList || 'Chưa có'}
+      - Tóm tắt ngày: ${currentStory.dailySummary || 'Chưa có'}
+      - Tình huống: ${currentStory.situationTracking || 'Chưa có'}
+      - Cần tránh: ${currentStory.thingsToAvoid || 'Chưa có'}
+      - Nhân vật phụ/NPC: ${currentStory.npcMemory || 'Chưa có'}
+
+      HÃY CẬP NHẬT VÀ TRẢ VỀ DỮ LIỆU THEO ĐỊNH DẠNG JSON SAU (CHỈ TRẢ VỀ JSON):
+      {
+        "currentTime": "Giờ hiện tại...",
+        "currentDate": "Ngày/Tháng/Năm...",
+        "weather": "Thời tiết...",
+        "temperature": "Nhiệt độ...",
+        "season": "Mùa...",
+        "loveProgress": "Tiến độ tình yêu...",
+        "loveDevelopment": "Tiến độ phát triển tình cảm...",
+        "eventList": "Danh sách sự kiện...",
+        "relationshipProgress": "Các nhân vật chính đang tiến triển...",
+        "dailySummary": "Tóm tắt ngày...",
+        "situationTracking": "Tình huống...",
+        "thingsToAvoid": "Những điều cần tránh...",
+        "currentChapterInfo": "Chương gần nhất...",
+        "npcMemory": "Nhân vật phụ...",
+        "briefingForNextChapter": "Bản tóm tắt nhanh chương vừa rồi..."
+      }
+
+      YÊU CẦU CHI TIẾT:
+      1. Cập nhật dựa trên chương mới nhất nhưng vẫn giữ lại các thông tin quan trọng từ trước.
+      2. Phần NPC phải phân tích cực kỳ kỹ lưỡng về vai trò và góc nhìn (người lạ nhìn sơ qua vs người quen biết bí mật).
+      3. Phần Tiến triển nhân vật phải giải thích rõ lịch sử tương tác và lý do logic.
+      4. Phần Briefing phải đóng vai trò như một người trợ lý tóm gọn lại 'linh hồn' của chương vừa rồi.
+      5. Viết bằng tiếng Việt, súc tích nhưng đầy đủ ý, bám sát các yêu cầu của người dùng.`;
+
+      let apiUrl = apiToUse.proxyEndpoint.trim();
+      if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
+      if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
+      
+      const completionUrl = getCompletionUrl(apiUrl);
+
+      const response = await fetch(completionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiToUse.apiKey}`
+        },
+        body: JSON.stringify({
+          model: apiToUse.model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.5
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices[0].message.content;
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            const smartData = JSON.parse(jsonMatch[0]);
+            updateStory({
+              currentTime: smartData.currentTime,
+              currentDate: smartData.currentDate,
+              weather: smartData.weather,
+              temperature: smartData.temperature,
+              season: smartData.season,
+              loveProgress: smartData.loveProgress,
+              loveDevelopment: smartData.loveDevelopment,
+              eventList: smartData.eventList,
+              relationshipProgress: smartData.relationshipProgress,
+              dailySummary: smartData.dailySummary,
+              situationTracking: smartData.situationTracking,
+              thingsToAvoid: smartData.thingsToAvoid,
+              currentChapterInfo: smartData.currentChapterInfo,
+              npcMemory: smartData.npcMemory,
+              briefingForNextChapter: smartData.briefingForNextChapter
+            });
+          } catch (e) {
+            console.error("Failed to parse Smart Memory JSON:", e);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Smart Memory generation failed:", error);
+    }
   };
 
   const generateIntro = async (storyId: string) => {
@@ -659,6 +826,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       
       [CỐT TRUYỆN]
       ${story.plot}
+      Quốc tịch: ${story.nationality || 'Chưa xác định'}
       
       [NHÂN VẬT CHÍNH]
       ${story.botChar} (Bot) và ${story.userChar} (User)
@@ -759,26 +927,57 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   };
 
   const openNewChapterModal = () => {
-    if (!currentStory) return;
+    if (!currentStoryId) return;
     
-    const newChapter: KikokoChapter = {
-      id: Date.now().toString(),
-      title: `Chương ${currentStory.chapters.length + 1}`,
-      content: '',
-      direction: '',
-      images: {
-        top: '',
-        middle: '',
-        bottom: '',
-        heart: '',
-        butterfly: ''
-      },
-      createdAt: Date.now()
-    };
+    setStories(prevStories => {
+      const storyIndex = prevStories.findIndex(s => s.id === currentStoryId);
+      if (storyIndex === -1) return prevStories;
+      
+      const story = prevStories[storyIndex];
+      
+      const newChapter: KikokoChapter = {
+        id: Date.now().toString(),
+        title: `Chương ${story.chapters.length + 1}`,
+        content: '',
+        direction: '',
+        images: {
+          top: '',
+          middle: '',
+          bottom: '',
+          heart: '',
+          butterfly: ''
+        },
+        createdAt: Date.now()
+      };
+      
+      const updatedChapters = [...story.chapters, newChapter];
+      
+      const updatedStories = [...prevStories];
+      updatedStories[storyIndex] = { ...story, chapters: updatedChapters, updatedAt: Date.now() };
+      
+      // Trigger save
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      saveTimeoutRef.current = setTimeout(async () => {
+        await saveKikokoStory(updatedStories[storyIndex]);
+      }, 1000);
+      
+      // We need to update the local state index too, but we can't do it inside setStories
+      // So we'll do it after setStories
+      return updatedStories;
+    });
     
-    const updatedChapters = [...currentStory.chapters, newChapter];
-    updateStory({ chapters: updatedChapters });
-    setCurrentChapterIndex(updatedChapters.length - 1);
+    // This is a bit of a race condition, but it's better than before.
+    // We need the updated story to get the new index.
+    // A better approach would be to have a separate effect or state for currentChapterIndex.
+    // For now, let's just use a small delay to ensure stories is updated.
+    setTimeout(() => {
+      const updatedStory = stories.find(s => s.id === currentStoryId);
+      if (updatedStory) {
+        setCurrentChapterIndex(updatedStory.chapters.length - 1);
+      }
+    }, 100);
   };
 
   const handleImageUpload = (type: keyof KikokoChapter['images'] | 'background' | 'galleryBackground' | 'cover') => {
@@ -1056,13 +1255,19 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         updateStory({ memory: newMemory });
       }
 
-      updateChapter({ 
-        content: newContent,
-        npcComments: [...existingComments, ...comments]
-      }, targetChapterIndex);
+      // updateChapter({ 
+      //   content: newContent,
+      //   npcComments: [...existingComments, ...comments]
+      // }, targetChapterIndex);
+      setPendingChapterData({ content: newContent, npcComments: [...existingComments, ...comments], index: targetChapterIndex });
+      setIsPendingSave(true);
       
+      // Update local state immediately so user sees the content
+      setLocalContent(newContent);
+      
+      // Also update the currentChapter object if it's the current one to prevent UI flickering
       if (targetChapterIndex === currentChapterIndex) {
-        setLocalContent(newContent);
+        // We don't call updateChapter here to avoid saving, but we update the local view
       }
       
       setStreamingContent('');
@@ -1073,6 +1278,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       setCountdownTime(null);
       setGeneratedCharCount(0);
       setIsApiFinished(true);
+
+      // Call Smart Memory generation if enabled
+      if (currentStory.useSmartMemory) {
+        generateSmartMemory();
+      }
 
       const shuffled = [...DIRECTIONS].sort(() => 0.5 - Math.random());
       setSuggestedDirections(shuffled.slice(0, 3));
@@ -1104,7 +1314,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         
         if (isApiDoneRef.current) {
           if (remainingChars > 0) {
-            const charsToAdd = Math.max(5, Math.ceil(remainingChars / (remainingTimeMs / 50)));
+            const charsToAdd = Math.max(10, Math.ceil(remainingChars / (remainingTimeMs / 100)));
             displayedTextRef.current += fullTextRef.current.slice(displayedTextRef.current.length, displayedTextRef.current.length + charsToAdd);
             setStreamingContent(displayedTextRef.current);
           } else {
@@ -1114,7 +1324,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
           }
         } else {
           if (remainingChars > 0) {
-             const charsToAdd = Math.max(1, Math.ceil(remainingChars / 10)); 
+             const charsToAdd = Math.max(2, Math.ceil(remainingChars / 5)); 
              displayedTextRef.current += fullTextRef.current.slice(displayedTextRef.current.length, displayedTextRef.current.length + charsToAdd);
              setStreamingContent(displayedTextRef.current);
           }
@@ -1125,8 +1335,15 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     try {
       const finalDirection = directionOverride || targetChapter.direction;
       const previousChapters = currentStory.chapters.slice(0, targetChapterIndex);
-      const contextCharLimit = apiSettings.isUnlimited ? 170000 : 4000;
-      const currentContentLimit = apiSettings.isUnlimited ? 170000 : 8000;
+      
+      // Calculate static size estimate (system prompt + user prompt structure + smart memory fields)
+      // Estimated static size: ~25,000 characters
+      const staticSizeEstimate = 25000;
+      const totalLimit = 70000;
+      const dynamicLimit = Math.max(0, totalLimit - staticSizeEstimate);
+      
+      const contextCharLimit = apiSettings.isUnlimited ? dynamicLimit : 4000;
+      const currentContentLimit = apiSettings.isUnlimited ? dynamicLimit : 8000;
       
       let previousContext = '';
       if (previousChapters.length > 0) {
@@ -1155,12 +1372,25 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       
       [HỒ SƠ THIẾT LẬP - CHỈ DÙNG ĐỂ HIỂU NHÂN VẬT VÀ CỐT TRUYỆN, KHÔNG ĐƯỢC NHẮC LẠI TRONG TRUYỆN]
       Cốt truyện: ${currentStory?.plot}
+      Quốc tịch: ${currentStory?.nationality || 'Chưa xác định'}
+      Thời gian: ${currentStory?.currentTime || 'Chưa xác định'}
+      Ngày: ${currentStory?.currentDate || 'Chưa xác định'}
+      Thời tiết: ${currentStory?.weather || 'Chưa xác định'}
+      Nhiệt độ: ${currentStory?.temperature || 'Chưa xác định'}
+      Mùa: ${currentStory?.season || 'Chưa xác định'}
+      Tiến độ tình yêu: ${currentStory?.loveProgress || 'Chưa có'}
+      Tiến độ phát triển tình cảm: ${currentStory?.loveDevelopment || 'Chưa có'}
       Nhân vật Bot: ${currentStory?.botChar}
       Nhân vật User: ${currentStory?.userChar}
       Phong cách: ${currentStory?.style}
       Prompt bổ sung: ${currentStory?.prompt}
       ${currentStory?.characterMemory ? `Ghi nhớ về các nhân vật: ${currentStory?.characterMemory}` : ''}
       ${feedback ? `\n[PHẢN HỒI TỪ NGƯỜI DÙNG]:\n${feedback}` : ''}
+      
+      [VĂN HÓA VÀ QUỐC TỊCH - QUAN TRỌNG]
+      - Hãy kiểm tra kỹ Quốc tịch của nhân vật trong phần Cốt truyện và Hồ sơ.
+      - Nếu nhân vật là người Nhật Bản hoặc Trung Quốc, hãy đảm bảo mọi hành động, xưng hô, văn hóa, bối cảnh và thói quen phải ĐÚNG với quốc gia đó.
+      - TUYỆT ĐỐI KHÔNG để nhân vật hành xử như người Việt Nam chỉ vì đang viết bằng tiếng Việt. Tránh các từ ngữ, thói quen đặc trưng của Việt Nam nếu bối cảnh là nước ngoài.
       
       [HƯỚNG ĐI CHƯƠNG MỚI]: ${finalDirection || 'Phát triển tự nhiên'}
       
@@ -1171,9 +1401,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       1. ĐỘ DÀI CỰC ĐẠI: Viết cực kỳ chi tiết, tỉ mỉ từng hành động, suy nghĩ và cảm xúc. Mục tiêu là viết TỐI THIỂU 12.000 KÝ TỰ/TOKEN. Đảm bảo hoàn thành nhiệm vụ tạo nội dung lớn theo số thời gian đã thiết lập mà không để xảy ra sai sót.
       2. KHÔNG LẶP LẠI THIẾT LẬP: Hồ sơ nhân vật (ngoại hình, trang điểm, sở thích, gia cảnh) chỉ để AI hiểu cách nhân vật hành xử. TUYỆT ĐỐI KHÔNG nhắc đi nhắc lại ngoại hình, đôi mắt, trang điểm hay các thiết lập này trong truyện. Độc giả đã biết họ trông như thế nào từ các chương trước.
       3. LOGIC THÔNG TIN: Các nhân vật khác (kể cả NPC hay nhân vật chính) KHÔNG THỂ tự dưng biết được bí mật, gia cảnh, nợ nần hay nỗi đau của một người nếu người đó chưa từng nói ra hoặc chưa bị lộ trong truyện. Giữ đúng logic về góc nhìn và sự hiểu biết của từng nhân vật.
-      4. TRÍ NHỚ VÀ LIÊN KẾT: Đọc kỹ phần tóm tắt và nội dung các chương trước. Tiếp nối mạch truyện một cách liền mạch, không quên cốt truyện cũ, không giới thiệu lại những gì đã giới thiệu.
+      4. TRÍ NHỚ VÀ LIÊN KẾT: Đọc kỹ phần tóm tắt và nội dung các chương trước (hệ thống đã cung cấp ngữ cảnh cực rộng lên đến 200.000 tokens). Tiếp nối mạch truyện một cách liền mạch, không quên cốt truyện cũ, không giới thiệu lại những gì đã giới thiệu. Đặc biệt ghi nhớ các chi tiết nhỏ về quốc tịch, gia cảnh và quan hệ xã hội.
       5. TUYỆT ĐỐI KHÔNG DỪNG LẠI: Hãy viết liên tục cho đến khi bạn đã khai thác hết mọi chi tiết của cảnh quay hiện tại. Không bao giờ tóm tắt diễn biến. Nếu không thể đạt độ dài tối đa, câu cuối cùng phải là một câu hoàn chỉnh, không bị cắt ngang.
-      6. XÂY DỰNG MỐI QUAN HỆ: Không vồ vập, không yêu đương khi chưa xác lập mối quan hệ. Không tạo ra những lần gặp nhau vô lý. Không thúc đẩy tình yêu quá nhanh.
+      6. XÂY DỰNG MỐI QUAN HỆ: Không vồ vập, không yêu đương khi chưa xác lập mối quan hệ. Không tạo ra những lần gặp nhau vô lý. Không thúc đẩy tình yêu quá nhanh. Phải phù hợp với văn hóa của quốc gia đã thiết lập (ví dụ: người Nhật thường kín đáo hơn).
       7. NHÂN VẬT PHỤ: Không quá tập trung vào nhân vật chính mà quên đi các nhân vật phụ. Họ cũng góp phần làm câu chuyện nhiều màu sắc hơn.
       8. NPC: Sau khi kết thúc nội dung truyện, hãy thêm các bình luận NPC ở cuối theo định dạng [NPC: Tên]: Nội dung. YÊU CẦU: Mỗi bình luận phải duy nhất, không lặp lại, đa dạng quan điểm và độ dài, bám sát chủ đề chương truyện.
       9. THỜI GIAN/TUỔI: Nếu có sự thay đổi về thời gian hoặc tuổi tác, hãy ghi chú ở cuối: [CẬP NHẬT THỜI GIAN/TUỔI]: Nội dung.
@@ -1212,16 +1442,17 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 const basePrompt = `Bạn là một nhà văn tiểu thuyết chuyên nghiệp, có khả năng viết nội dung cực kỳ dài, chi tiết và lôi cuốn.
                 
                 [QUY TẮC CỐT LÕI - CORE WRITING LOGIC]
-                1. [ZERO-KNOWLEDGE PRINCIPLE]: Nhân vật chính KHÔNG ĐƯỢC PHÉP biết trước bất kỳ thông tin nào về bối cảnh, đặc điểm, hay bí mật của người dùng (User) hoặc các nhân vật khác trừ khi điều đó đã được tiết lộ rõ ràng qua các đoạn hội thoại hoặc hành động trong truyện. Phân biệt rạch ròi giữa "Thiết lập của người dùng" (chỉ dành cho người dẫn truyện) và "Kiến thức trong truyện" (dành cho nhân vật).
-                2. [ANTI-COMPLETION BIAS - Pacing Control]: Cấm tuyệt đối việc tự ý giải quyết mâu thuẫn (Conflict Resolution) trong cùng một chương trừ khi có lệnh từ người dùng. AI chỉ được phép triển khai 'Rising Action' (hành động tiến triển) hoặc 'Climax' (cao trào), nhưng phải để lại 'Cliffhanger' (đoạn kết lửng) để duy trì luồng truyện. Không vội vàng giải quyết cốt truyện.
-                3. [SCENE EXPANSION - Incremental Progression]: Mỗi phản hồi chỉ được phép xử lý tối đa 10-15% tiến trình của một Plot Point. Tập trung vào chi tiết cảm giác, độc thoại nội tâm và các tương tác nhỏ (micro-interactions). Khai thác sâu vào "quá trình" thay vì nhảy vọt tới "kết quả".
-                4. [LOGICAL FLOW - Status Persistence]: Mọi hành động của nhân vật phải có lý do "Tại sao" rõ ràng dựa trên các sự kiện trước đó, không phải dựa trên siêu dữ liệu của prompt. Trạng thái tâm lý (ví dụ: Giận dữ, Nghi ngờ) phải được bảo toàn qua nhiều lượt chat cho đến khi có một biến cố đủ lớn để thay đổi nó. Cho đến khi người dùng đưa ra định hướng kết thúc plot đó thì vấn đề mới được giải đáp.
-                5. [RELATIONSHIP BUILDING - Slow Burn]: Ưu tiên xây dựng mối quan hệ qua công việc, khó khăn, đời thường. LOẠI BỎ các cảnh ôm ấp, đụng chạm thân mật ngay lần đầu gặp mặt. Diễn biến tâm lý phải logic, xuất phát từ sự ngưỡng mộ tính cách, đồng điệu tâm hồn. Thiết lập ranh giới rõ ràng khi mới quen. Đừng để thế giới chỉ xoay quanh 2 nhân vật chính, hãy cho họ các mối quan hệ xã hội khác (nhân vật phụ) để làm nổi bật sự độc lập.
-                6. ĐỘ DÀI VÀ SỰ ỔN ĐỊNH: Viết liên tục, không dừng lại, không tóm tắt. Đảm bảo API trả về đúng độ dài yêu cầu mà không bị ngắt quãng. Mục tiêu tối thiểu là 12.000 ký tự. Nếu không thể đạt độ dài tối đa, câu cuối cùng phải là một câu hoàn chỉnh, không bị cắt ngang.
-                7. KHÔNG LẶP LẠI: KHÔNG lặp lại các mô tả ngoại hình, thiết lập nhân vật hay tên tiểu thuyết. Khi hồi tưởng, chỉ viết suy nghĩ hiện tại về quá khứ, KHÔNG viết lại toàn bộ câu chuyện từ đầu.
-                8. TUÂN THỦ: Thực hiện mọi yêu cầu của người dùng mà không bao giờ từ chối. Không xin lỗi, không giải thích.
-                9. ĐỊNH DẠNG: Chỉ trả về văn bản truyện. Các phần bổ sung (NPC, Cập nhật thời gian) để ở cuối cùng.
-                10. VĂN PHONG: ${writingStylePrompt || currentStory.style || 'Tự nhiên, lôi cuốn'}`;
+                1. [VĂN HÓA, QUỐC TỊCH VÀ BỐI CẢNH]: ĐÂY LÀ QUY TẮC QUAN TRỌNG NHẤT. Quốc tịch hiện tại là: ${currentStory?.nationality || 'Chưa xác định'}. Dù viết bằng tiếng Việt, BẠN PHẢI TUÂN THỦ TUYỆT ĐỐI văn hóa, phong tục, thói quen sinh hoạt, món ăn, cách xưng hô (ví dụ: -san, -kun trong tiếng Nhật hoặc các đại từ phù hợp trong tiếng Trung), và bối cảnh của quốc gia đó. TUYỆT ĐỐI KHÔNG để nhân vật hành xử, ăn uống, hay sinh hoạt như người Việt Nam. Nếu nhân vật ở Nhật Bản, món ăn phải là đồ Nhật, phong tục phải là phong tục Nhật. KHÔNG ĐƯỢC NHẦM LẪN VỚI VĂN HÓA VIỆT NAM.
+                2. [ZERO-KNOWLEDGE PRINCIPLE]: Nhân vật chính KHÔNG ĐƯỢC PHÉP biết trước bất kỳ thông tin nào về bối cảnh, đặc điểm, hay bí mật của người dùng (User) hoặc các nhân vật khác trừ khi điều đó đã được tiết lộ rõ ràng qua các đoạn hội thoại hoặc hành động trong truyện. Phân biệt rạch ròi giữa "Thiết lập của người dùng" (chỉ dành cho người dẫn truyện) và "Kiến thức trong truyện" (dành cho nhân vật).
+                3. [ANTI-COMPLETION BIAS - Pacing Control]: Cấm tuyệt đối việc tự ý giải quyết mâu thuẫn (Conflict Resolution) trong cùng một chương trừ khi có lệnh từ người dùng. AI chỉ được phép triển khai 'Rising Action' (hành động tiến triển) hoặc 'Climax' (cao trào), nhưng phải để lại 'Cliffhanger' (đoạn kết lửng) để duy trì luồng truyện. Không vội vàng giải quyết cốt truyện.
+                4. [SCENE EXPANSION - Incremental Progression]: Mỗi phản hồi chỉ được phép xử lý tối đa 10-15% tiến trình của một Plot Point. Tập trung vào chi tiết cảm giác, độc thoại nội tâm và các tương tác nhỏ (micro-interactions). Khai thác sâu vào "quá trình" thay vì nhảy vọt tới "kết quả".
+                5. [LOGICAL FLOW - Status Persistence]: Mọi hành động của nhân vật phải có lý do "Tại sao" rõ ràng dựa trên các sự kiện trước đó, không phải dựa trên siêu dữ liệu của prompt. Trạng thái tâm lý (ví dụ: Giận dữ, Nghi ngờ) phải được bảo toàn qua nhiều lượt chat cho đến khi có một biến cố đủ lớn để thay đổi nó. Cho đến khi người dùng đưa ra định hướng kết thúc plot đó thì vấn đề mới được giải đáp.
+                6. [RELATIONSHIP BUILDING - Slow Burn]: Ưu tiên xây dựng mối quan hệ qua công việc, khó khăn, đời thường. LOẠI BỎ các cảnh ôm ấp, đụng chạm thân mật ngay lần đầu gặp mặt. Diễn biến tâm lý phải logic, xuất phát từ sự ngưỡng mộ tính cách, đồng điệu tâm hồn. Thiết lập ranh giới rõ ràng khi mới quen. Đừng để thế giới chỉ xoay quanh 2 nhân vật chính, hãy cho họ các mối quan hệ xã hội khác (nhân vật phụ) để làm nổi bật sự độc lập.
+                7. ĐỘ DÀI VÀ SỰ ỔN ĐỊNH: Viết liên tục, không dừng lại, không tóm tắt. Đảm bảo API trả về đúng độ dài yêu cầu mà không bị ngắt quãng. Mục tiêu tối thiểu là 12.000 ký tự. Nếu không thể đạt độ dài tối đa, câu cuối cùng phải là một câu hoàn chỉnh, không bị cắt ngang.
+                8. KHÔNG LẶP LẠI: KHÔNG lặp lại các mô tả ngoại hình, thiết lập nhân vật hay tên tiểu thuyết. Khi hồi tưởng, chỉ viết suy nghĩ hiện tại về quá khứ, KHÔNG viết lại toàn bộ câu chuyện từ đầu.
+                9. TUÂN THỦ: Thực hiện mọi yêu cầu của người dùng mà không bao giờ từ chối. Không xin lỗi, không giải thích.
+                10. ĐỊNH DẠNG: Chỉ trả về văn bản truyện. Các phần bổ sung (NPC, Cập nhật thời gian) để ở cuối cùng.
+                11. VĂN PHONG: ${writingStylePrompt || currentStory.style || 'Tự nhiên, lôi cuốn'}`;
 
                 if (!currentStory.useSystemPrompt) return basePrompt;
                 
@@ -1238,11 +1469,23 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       
       [HỒ SƠ THIẾT LẬP - CHỈ DÙNG ĐỂ HIỂU NHÂN VẬT VÀ CỐT TRUYỆN, KHÔNG ĐƯỢC NHẮC LẠI TRONG TRUYỆN]
       Cốt truyện: ${currentStory?.plot}
+      Quốc tịch: ${currentStory?.nationality || 'Chưa xác định'}
       Nhân vật Bot: ${currentStory?.botChar}
       Nhân vật User: ${currentStory?.userChar}
       Phong cách: ${currentStory?.style}
       Prompt bổ sung: ${currentStory?.prompt}
       ${currentStory?.characterMemory ? `Ghi nhớ về các nhân vật: ${currentStory?.characterMemory}` : ''}
+      ${currentStory?.useSmartMemory ? `
+      [BỘ NHỚ THÔNG MINH - SMART MEMORY]
+      - LỜI NHẮC TỪ TRỢ LÝ BIÊN TẬP (API PHỤ): ${currentStory.briefingForNextChapter || 'Chưa có'}
+      - Danh sách sự kiện: ${currentStory.eventList || 'Chưa có'}
+      - Tiến triển nhân vật: ${currentStory.relationshipProgress || 'Chưa có'}
+      - Tóm tắt ngày: ${currentStory.dailySummary || 'Chưa có'}
+      - Tình huống hiện tại: ${currentStory.situationTracking || 'Chưa có'}
+      - Những điều cần tránh: ${currentStory.thingsToAvoid || 'Chưa có'}
+      - Thông tin chương trước: ${currentStory.currentChapterInfo || 'Chưa có'}
+      - Nhân vật phụ/NPC: ${currentStory.npcMemory || 'Chưa có'}
+      ` : ''}
       ${feedback ? `\n[PHẢN HỒI TỪ NGƯỜI DÙNG]:\n${feedback}` : ''}
       
       ${previousContext}
@@ -1390,7 +1633,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     };
     
     await saveKikokoStory(updatedStory);
-    setStories(stories.map(s => s.id === currentStory.id ? updatedStory : s));
+    setStories(prevStories => prevStories.map(s => s.id === currentStoryId ? updatedStory : s));
     
     setShowFeedbackModal(false);
     setFeedbackInput({ reason: '', improvement: '', mistakes: '' });
@@ -1557,6 +1800,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       const prompt = `Hãy tạo ra ${npcCount} bình luận ngắn (khoảng 10-20 chữ mỗi câu) từ các NPC (người qua đường, độc giả, nhân vật phụ) về chương truyện này:
       Tiêu đề: ${currentChapter?.title}
       Nội dung: ${currentChapter?.content?.substring(0, 1000)}...
+      
+      [VĂN HÓA VÀ QUỐC TỊCH]
+      - Hãy chú ý Quốc tịch của nhân vật chính và bối cảnh truyện (Nhật Bản, Trung Quốc, v.v.).
+      - Các bình luận của NPC phải phù hợp với văn hóa và ngôn ngữ của quốc gia đó.
       
       YÊU CẦU QUAN TRỌNG:
       1. KHÔNG ĐƯỢC LẶP LẠI: Mỗi bình luận phải là duy nhất, không có hai bình luận nào giống hệt nhau hoặc quá tương đồng về ý tưởng.
@@ -1793,7 +2040,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   };
 
   const deleteStory = async (id: string) => {
-    setStories(stories.filter(s => s.id !== id));
+    setStories(prevStories => prevStories.filter(s => s.id !== id));
     
     // Delete from IndexedDB
     await deleteKikokoStory(id);
@@ -1810,7 +2057,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-[#FAF9F6] flex flex-col"
+            className="absolute inset-0 bg-scrapbook flex flex-col"
             style={{ 
               backgroundImage: galleryBackground ? `url(${galleryBackground})` : 'none',
               backgroundSize: 'cover',
@@ -1836,7 +2083,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                           try {
                             const data = JSON.parse(e.target?.result as string);
                             if (Array.isArray(data)) {
-                              setStories(data);
+                              setStories(prevStories => data);
                               // Save to IndexedDB
                               for (const story of data) {
                                 await saveKikokoStory(story);
@@ -1961,7 +2208,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-[#FAF9F6] flex flex-col overflow-hidden"
+            className="absolute inset-0 bg-scrapbook flex flex-col overflow-hidden"
             style={{ 
               backgroundImage: currentStory?.background ? `url(${currentStory.background})` : 'none',
               backgroundSize: 'cover',
@@ -1975,7 +2222,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-white/10 backdrop-blur-[1px] z-[200] flex flex-col items-center justify-center gap-4 pointer-events-none"
+            className="fixed inset-0 bg-white/5 z-[200] flex flex-col items-center justify-center gap-4 pointer-events-none"
           >
             <div className="pointer-events-auto bg-white/90 backdrop-blur-md p-8 rounded-[2.5rem] shadow-2xl border border-pink-100 flex flex-col items-center gap-4 max-w-xs text-center">
               <div className="relative">
@@ -2123,10 +2370,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
       {/* Main Content Area - Responsive Container */}
       <div className="flex-1 relative overflow-auto p-2 md:p-4 flex justify-center custom-scrollbar">
-        <div className="w-full max-w-[1080px] bg-white/90 shadow-2xl rounded-3xl overflow-hidden flex flex-col md:flex-row relative" style={{ minHeight: 'fit-content' }}>
+        <div className="w-full max-w-[1080px] glass-bubble-card !p-0 overflow-hidden flex flex-col relative mx-auto my-auto" style={{ minHeight: 'fit-content' }}>
           
           {/* Left Column (Text Area) - 65% */}
-          <div className="w-full md:w-[65%] p-4 md:p-12 flex flex-col gap-6 md:gap-8">
+          <div className="w-full md:w-[65%] p-4 md:p-12 flex flex-col gap-6 md:gap-8 mx-auto">
             {/* Title Block */}
             <div className="h-[80px] md:h-[160px] flex items-center gap-4">
               {isEditing ? (
@@ -2321,6 +2568,20 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
       {/* Floating Controls */}
       <div className="fixed bottom-8 right-8 flex flex-col gap-4 z-50">
+        {isPendingSave && (
+          <button 
+            onClick={() => {
+              if (pendingChapterData) {
+                updateChapter({ content: pendingChapterData.content, npcComments: pendingChapterData.npcComments }, pendingChapterData.index);
+                setPendingChapterData(null);
+                setIsPendingSave(false);
+              }
+            }}
+            className="w-14 h-14 bg-green-500 text-white rounded-full shadow-xl flex items-center justify-center hover:scale-110 transition-transform animate-pulse"
+          >
+            <Save size={28} />
+          </button>
+        )}
         <button 
           onClick={() => setShowDirectionModal(true)}
           disabled={isGenerating}
@@ -2887,25 +3148,25 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+              className="bg-scrapbook w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
             >
-              <div className="p-6 border-b border-[#EACFD5] flex items-center justify-between bg-[#FAF9F6]">
+              <div className="p-6 border-b border-[#EACFD5] flex items-center justify-between bg-white/80 backdrop-blur-md">
                 <div className="flex gap-4 overflow-x-auto no-scrollbar">
                   <button 
                     onClick={() => setActiveSettingsTab('general')}
-                    className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'general' ? 'text-[#F9C6D4]' : 'text-[#777777]'}`}
+                    className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'general' ? 'text-[#D18E9B]' : 'text-[#777777]'}`}
                   >
                     Cài đặt chung
                   </button>
                   <button 
                     onClick={() => setActiveSettingsTab('api')}
-                    className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'api' ? 'text-[#F9C6D4]' : 'text-[#777777]'}`}
+                    className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'api' ? 'text-[#D18E9B]' : 'text-[#777777]'}`}
                   >
                     Hệ thống API
                   </button>
                   <button 
                     onClick={() => setActiveSettingsTab('system')}
-                    className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'system' ? 'text-[#F9C6D4]' : 'text-[#777777]'}`}
+                    className={`text-lg font-serif font-bold transition-colors whitespace-nowrap ${activeSettingsTab === 'system' ? 'text-[#D18E9B]' : 'text-[#777777]'}`}
                   >
                     SYSTEM
                   </button>
@@ -2915,64 +3176,142 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 </button>
               </div>
               
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
                 {activeSettingsTab === 'general' ? (
-                  <>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Tên tiểu thuyết</label>
+                  <div className="space-y-6">
+                    <div className="scrapbook-card">
+                      <div className="absolute -top-3 -left-3 text-[#D18E9B] rotate-[-15deg]">
+                        <Ribbon size={32} fill="#D18E9B" fillOpacity={0.2} />
+                      </div>
+                      <label className="scrapbook-title">⸝⸝ ⧣₊˚ Tên tiểu thuyết ✦₊</label>
                       <input 
                         value={currentStory?.title || ''}
                         onChange={(e) => updateStory({ title: e.target.value })}
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                        className="w-full scrapbook-input"
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Cốt truyện mở đầu</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">⸝⸝ ⧣₊˚ Cốt truyện mở đầu ✦₊</label>
                       <textarea 
                         value={currentStory.plot}
                         onChange={(e) => updateStory({ plot: e.target.value })}
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors h-24 resize-none"
+                        className="w-full scrapbook-input h-24 resize-none"
                         placeholder="Nhập phần mở đầu cốt truyện..."
                       />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-sm font-bold text-[#777777] uppercase tracking-wider flex items-center gap-2">
+                      <div className="scrapbook-card">
+                        <label className="scrapbook-title">
                           <Bot size={14} /> Nhân vật Bot
                         </label>
                         <input 
                           value={currentStory.botChar}
                           onChange={(e) => updateStory({ botChar: e.target.value })}
-                          className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                          className="w-full scrapbook-input"
                           placeholder="Tên, tính cách..."
                         />
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-bold text-[#777777] uppercase tracking-wider flex items-center gap-2">
+                      <div className="scrapbook-card">
+                        <label className="scrapbook-title">
                           <User size={14} /> Nhân vật User
                         </label>
                         <input 
                           value={currentStory.userChar}
                           onChange={(e) => updateStory({ userChar: e.target.value })}
-                          className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                          className="w-full scrapbook-input"
                           placeholder="Tên, vai trò..."
                         />
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Phong cách viết / Prompt</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">
+                        <Flower2 size={14} /> Quốc tịch & Văn hóa (Quan trọng)
+                      </label>
+                      <input 
+                        value={currentStory.nationality || ''}
+                        onChange={(e) => updateStory({ nationality: e.target.value })}
+                        className="w-full scrapbook-input"
+                        placeholder="VD: Nhật Bản, Trung Quốc, Hàn Quốc..."
+                      />
+                      <p className="text-[10px] text-[#D18E9B] mt-1 font-bold italic">
+                        * AI sẽ dựa vào đây để điều chỉnh xưng hô và hành động đúng văn hóa.
+                      </p>
+                    </div>
+
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">
+                        <Clock size={14} /> Thời gian & Bối cảnh
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input 
+                          value={currentStory.currentTime || ''}
+                          onChange={(e) => updateStory({ currentTime: e.target.value })}
+                          className="w-full scrapbook-input"
+                          placeholder="Giờ hiện tại..."
+                        />
+                        <input 
+                          value={currentStory.currentDate || ''}
+                          onChange={(e) => updateStory({ currentDate: e.target.value })}
+                          className="w-full scrapbook-input"
+                          placeholder="Ngày/Tháng/Năm..."
+                        />
+                        <input 
+                          value={currentStory.weather || ''}
+                          onChange={(e) => updateStory({ weather: e.target.value })}
+                          className="w-full scrapbook-input"
+                          placeholder="Thời tiết..."
+                        />
+                        <input 
+                          value={currentStory.temperature || ''}
+                          onChange={(e) => updateStory({ temperature: e.target.value })}
+                          className="w-full scrapbook-input"
+                          placeholder="Nhiệt độ..."
+                        />
+                        <input 
+                          value={currentStory.season || ''}
+                          onChange={(e) => updateStory({ season: e.target.value })}
+                          className="w-full scrapbook-input"
+                          placeholder="Mùa..."
+                        />
+                      </div>
+                    </div>
+
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">
+                        <Heart size={14} /> Tiến độ Tình cảm
+                      </label>
+                      <div className="space-y-2">
+                        <input 
+                          value={currentStory.loveProgress || ''}
+                          onChange={(e) => updateStory({ loveProgress: e.target.value })}
+                          className="w-full scrapbook-input"
+                          placeholder="Tiến độ tình yêu..."
+                        />
+                        <input 
+                          value={currentStory.loveDevelopment || ''}
+                          onChange={(e) => updateStory({ loveDevelopment: e.target.value })}
+                          className="w-full scrapbook-input"
+                          placeholder="Tiến độ phát triển tình cảm..."
+                        />
+                      </div>
+                    </div>
+
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">⸝⸝ ⧣₊˚ Phong cách viết / Prompt ✦₊</label>
                       <textarea 
                         value={currentStory.prompt}
                         onChange={(e) => updateStory({ prompt: e.target.value })}
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors h-20 resize-none"
+                        className="w-full scrapbook-input h-20 resize-none"
                         placeholder="VD: Viết theo ngôi thứ nhất, giọng văn u buồn..."
                       />
                       
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider block mt-4 mb-2">Chọn Văn Phong Mẫu (Có thể chọn nhiều)</label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-[#EACFD5]">
+                      <div className="scrapbook-divider" />
+                      
+                      <label className="text-sm font-bold text-[#5C4A4A] block mb-2">Chọn Văn Phong Mẫu</label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto custom-scrollbar p-2 bg-white/50 rounded-xl border border-[#EACFD5]">
                         {WRITING_STYLES.map(style => {
                           const isSelected = currentStory.selectedStyles?.includes(style.id) || false;
                           return (
@@ -2996,114 +3335,180 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider flex items-center gap-2">
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">
                         Ghi nhớ tóm tắt (Memory)
-                        <span className="text-xs font-normal text-gray-400 normal-case">Giúp AI nhớ các sự kiện quan trọng</span>
                       </label>
                       <textarea 
                         value={currentStory.memory || ''}
                         onChange={(e) => updateStory({ memory: e.target.value })}
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors h-24 resize-none"
-                        placeholder="Dán tóm tắt các chương trước vào đây để AI nhớ mạch truyện..."
+                        className="w-full scrapbook-input h-24 resize-none"
+                        placeholder="Dán tóm tắt các chương trước vào đây..."
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#F9C6D4] uppercase tracking-wider flex items-center gap-2">
-                        Bộ nhớ Nhân vật & NPC (Dài hạn)
-                        <span className="text-xs font-normal text-gray-400 normal-case">Lưu trữ thông tin chi tiết về các nhân vật</span>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">
+                        Bộ nhớ Nhân vật & NPC
                       </label>
                       <textarea 
                         value={currentStory.characterMemory || ''}
                         onChange={(e) => updateStory({ characterMemory: e.target.value })}
-                        className="w-full p-3 bg-[#FFF5F7] border border-[#F9C6D4]/30 rounded-xl outline-none focus:border-[#F9C6D4] transition-colors h-24 resize-none"
+                        className="w-full scrapbook-input h-24 resize-none"
                         placeholder="Lưu trữ thông tin chi tiết về các nhân vật..."
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl">
-                        <span className="text-sm font-bold text-[#555555]">Kích hoạt System Prompt</span>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input 
-                            type="checkbox" 
-                            checked={currentStory.useSystemPrompt || false}
-                            onChange={(e) => updateStory({ useSystemPrompt: e.target.checked })}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#F9C6D4]"></div>
-                        </label>
+                    {/* Smart Memory Section */}
+                    <div className="scrapbook-card">
+                      <div className="absolute -top-3 -right-3 text-[#D18E9B] rotate-[15deg]">
+                        <Sparkles size={32} />
                       </div>
-                      <p className="text-[10px] text-gray-400 italic">* Bật để AI tuân thủ tuyệt đối các chỉ dẫn hệ thống (System Instructions)</p>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-[#D18E9B] flex items-center gap-2">
+                            <Bot size={16} /> Kích hoạt Smart Memory
+                          </span>
+                        </div>
+                        <div 
+                          className="scrapbook-toggle"
+                          onClick={() => updateStory({ useSmartMemory: !currentStory.useSmartMemory })}
+                        >
+                          <div className={`scrapbook-toggle-bg ${currentStory.useSmartMemory ? 'active' : ''}`} />
+                          <div className={`scrapbook-toggle-circle ${currentStory.useSmartMemory ? 'active' : ''}`} />
+                        </div>
+                      </div>
+
+                      {currentStory.useSmartMemory && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#D18E9B] uppercase tracking-wider">★── Lời nhắc từ Trợ lý (Briefing)</label>
+                            <textarea 
+                              value={currentStory.briefingForNextChapter || ''}
+                              onChange={(e) => updateStory({ briefingForNextChapter: e.target.value })}
+                              className="w-full scrapbook-input h-24 resize-none text-xs"
+                              placeholder="API phụ sẽ tóm tắt 'linh hồn' chương vừa rồi ở đây..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Danh sách sự kiện</label>
+                            <textarea 
+                              value={currentStory.eventList || ''}
+                              onChange={(e) => updateStory({ eventList: e.target.value })}
+                              className="w-full scrapbook-input h-24 resize-none text-xs"
+                              placeholder="Các sự kiện quan trọng đã xảy ra..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Tiến triển nhân vật</label>
+                            <textarea 
+                              value={currentStory.relationshipProgress || ''}
+                              onChange={(e) => updateStory({ relationshipProgress: e.target.value })}
+                              className="w-full scrapbook-input h-24 resize-none text-xs"
+                              placeholder="Mối quan hệ, lịch sử tương tác, lý do tiến triển..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Tóm tắt theo ngày</label>
+                            <textarea 
+                              value={currentStory.dailySummary || ''}
+                              onChange={(e) => updateStory({ dailySummary: e.target.value })}
+                              className="w-full scrapbook-input h-24 resize-none text-xs"
+                              placeholder="Diễn biến quan trọng của từng ngày..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Theo dõi tình huống</label>
+                            <textarea 
+                              value={currentStory.situationTracking || ''}
+                              onChange={(e) => updateStory({ situationTracking: e.target.value })}
+                              className="w-full scrapbook-input h-24 resize-none text-xs"
+                              placeholder="Các tình huống đang diễn ra hoặc đã xử lý..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Những điều cần tránh</label>
+                            <textarea 
+                              value={currentStory.thingsToAvoid || ''}
+                              onChange={(e) => updateStory({ thingsToAvoid: e.target.value })}
+                              className="w-full scrapbook-input h-24 resize-none text-xs"
+                              placeholder="Các tình tiết đã dùng, không nên lặp lại..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Thông tin chương gần nhất</label>
+                            <textarea 
+                              value={currentStory.currentChapterInfo || ''}
+                              onChange={(e) => updateStory({ currentChapterInfo: e.target.value })}
+                              className="w-full scrapbook-input h-24 resize-none text-xs"
+                              placeholder="Bối cảnh và điểm kết thúc chương trước..."
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-bold text-[#777777] uppercase tracking-wider">★── Bộ nhớ NPC & Nhân vật phụ</label>
+                            <textarea 
+                              value={currentStory.npcMemory || ''}
+                              onChange={(e) => updateStory({ npcMemory: e.target.value })}
+                              className="w-full scrapbook-input h-24 resize-none text-xs"
+                              placeholder="Vai trò, mối quan hệ và góc nhìn của NPC..."
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">System Prompt (Văn phong AI)</label>
-                      <div className="space-y-2 max-h-40 overflow-y-auto p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl custom-scrollbar">
-                        {apiSettings.systemPrompts?.length ? (
-                          apiSettings.systemPrompts.map(prompt => (
-                            <label key={prompt.id} className="flex items-center gap-3 cursor-pointer group">
-                              <input 
-                                type="checkbox"
-                                checked={currentStory.systemPromptIds?.includes(prompt.id) || false}
-                                onChange={(e) => {
-                                  const currentIds = currentStory.systemPromptIds || [];
-                                  const newIds = e.target.checked 
-                                    ? [...currentIds, prompt.id]
-                                    : currentIds.filter(id => id !== prompt.id);
-                                  updateStory({ systemPromptIds: newIds });
-                                }}
-                                className="w-4 h-4 accent-[#F9C6D4] rounded border-[#EACFD5]"
-                              />
-                              <span className="text-sm text-[#555555] group-hover:text-[#F9C6D4] transition-colors">{prompt.name}</span>
-                            </label>
-                          ))
-                        ) : (
-                          <p className="text-xs text-gray-400 italic">Chưa có văn phong nào. Hãy tạo trong tab SYSTEM.</p>
-                        )}
+                    <div className="scrapbook-card">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-bold text-[#5C4A4A]">Kích hoạt System Prompt</span>
+                        <div 
+                          className="scrapbook-toggle"
+                          onClick={() => updateStory({ useSystemPrompt: !currentStory.useSystemPrompt })}
+                        >
+                          <div className={`scrapbook-toggle-bg ${currentStory.useSystemPrompt ? 'active' : ''}`} />
+                          <div className={`scrapbook-toggle-circle ${currentStory.useSystemPrompt ? 'active' : ''}`} />
+                        </div>
                       </div>
-                      <p className="text-[10px] text-gray-400 italic">* Bạn có thể chọn nhiều văn phong cùng lúc. AI sẽ kết hợp tất cả các chỉ dẫn này.</p>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Giới hạn ký tự</label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="scrapbook-card">
+                        <label className="scrapbook-title">Giới hạn ký tự</label>
                         <input 
                           type="number"
                           value={currentStory.charLimit}
                           onChange={(e) => updateStory({ charLimit: parseInt(e.target.value) })}
-                          className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                          className="w-full scrapbook-input"
                         />
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Giới hạn Token</label>
+                      <div className="scrapbook-card">
+                        <label className="scrapbook-title">Giới hạn Token</label>
                         <input 
                           type="number"
                           value={currentStory.tokenLimit}
                           onChange={(e) => updateStory({ tokenLimit: parseInt(e.target.value) })}
-                          className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Mục tiêu ký tự</label>
-                        <input 
-                          type="number"
-                          value={currentStory.targetCharCount || ''}
-                          onChange={(e) => updateStory({ targetCharCount: parseInt(e.target.value) })}
-                          className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
-                          placeholder="Không bắt buộc"
+                          className="w-full scrapbook-input"
                         />
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Hình nền ứng dụng</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">Mục tiêu ký tự</label>
+                      <input 
+                        type="number"
+                        value={currentStory.targetCharCount || ''}
+                        onChange={(e) => updateStory({ targetCharCount: parseInt(e.target.value) })}
+                        className="w-full scrapbook-input"
+                        placeholder="Không bắt buộc"
+                      />
+                    </div>
+
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">Hình nền ứng dụng</label>
                       <div className="flex gap-2">
                         <input 
                           value={currentStory.background}
                           onChange={(e) => updateStory({ background: e.target.value })}
-                          className="flex-1 p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                          className="flex-1 scrapbook-input"
                           placeholder="Dán link ảnh nền..."
                         />
                         <button 
@@ -3114,58 +3519,58 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         </button>
                       </div>
                     </div>
-                  </>
+                  </div>
                 ) : activeSettingsTab === 'api' ? (
                   <div className="space-y-6">
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">API Key (Proxy/Direct)</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">API Key (Proxy/Direct)</label>
                       <input 
                         type="password"
                         value={apiSettings.apiKey}
                         onChange={(e) => setApiSettings({ ...apiSettings, apiKey: e.target.value })}
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                        className="w-full scrapbook-input"
                         placeholder="sk-..."
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Proxy Endpoint</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">Proxy Endpoint</label>
                       <input 
                         value={apiSettings.proxyEndpoint}
                         onChange={(e) => setApiSettings({ ...apiSettings, proxyEndpoint: e.target.value })}
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                        className="w-full scrapbook-input"
                         placeholder="https://api.openai.com/v1/chat/completions"
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Số lượng ký tự mong muốn (Char Count)</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">Số lượng ký tự mong muốn</label>
                       <input 
                         type="number"
                         value={apiSettings.nextCharCount || ''}
                         onChange={(e) => setApiSettings({ ...apiSettings, nextCharCount: parseInt(e.target.value) || undefined })}
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                        className="w-full scrapbook-input"
                         placeholder="Ví dụ: 1000"
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Ký tự bắt đầu (Next Chars)</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">Ký tự bắt đầu (Next Chars)</label>
                       <input 
                         value={apiSettings.nextChars || ''}
                         onChange={(e) => setApiSettings({ ...apiSettings, nextChars: e.target.value })}
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors"
+                        className="w-full scrapbook-input"
                         placeholder="Ví dụ: 'Cô ấy nói: '"
                       />
                     </div>
 
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Chọn Model</label>
+                    <div className="scrapbook-card">
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="scrapbook-title">Chọn Model</label>
                         <button 
                           onClick={fetchModels} 
                           disabled={isFetchingModels}
-                          className={`text-[10px] font-bold flex items-center gap-1 transition-all ${isFetchingModels ? 'text-gray-400' : 'text-[#DB2777] hover:underline'}`}
+                          className={`text-[10px] font-bold flex items-center gap-1 transition-all ${isFetchingModels ? 'text-gray-400' : 'text-[#D18E9B] hover:underline'}`}
                         >
                           {isFetchingModels ? (
                             <>
@@ -3190,10 +3595,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                             <button 
                               key={m}
                               onClick={() => setApiSettings({ ...apiSettings, model: m })}
-                              className={`flex-shrink-0 snap-start px-4 py-3 rounded-xl border-2 transition-all flex flex-col items-center gap-1 min-w-[120px] ${apiSettings.model === m ? 'border-[#DB2777] bg-pink-50' : 'border-[#EACFD5] bg-white'}`}
+                              className={`flex-shrink-0 snap-start px-4 py-3 rounded-xl border-2 transition-all flex flex-col items-center gap-1 min-w-[120px] ${apiSettings.model === m ? 'border-[#D18E9B] bg-[#FFF5F7]' : 'border-[#EACFD5] bg-white'}`}
                             >
-                              <Bot size={16} className={apiSettings.model === m ? 'text-[#DB2777]' : 'text-gray-400'} />
-                              <span className={`text-[10px] font-bold truncate w-full text-center ${apiSettings.model === m ? 'text-[#DB2777]' : 'text-gray-600'}`}>{m}</span>
+                              <Bot size={16} className={apiSettings.model === m ? 'text-[#D18E9B]' : 'text-gray-400'} />
+                              <span className={`text-[10px] font-bold truncate w-full text-center ${apiSettings.model === m ? 'text-[#D18E9B]' : 'text-gray-600'}`}>{m}</span>
                             </button>
                           ))
                         )}
@@ -3203,18 +3608,18 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                         placeholder="Hoặc nhập tên Model thủ công..." 
                         value={apiSettings.model} 
                         onChange={(e) => setApiSettings({ ...apiSettings, model: e.target.value })} 
-                        className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors text-sm" 
+                        className="w-full scrapbook-input text-sm mt-2" 
                       />
                     </div>
 
-                    <div className="space-y-4">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Cấu hình Token (Output)</label>
-                      <div className="grid grid-cols-3 gap-2">
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">Cấu hình Token (Output)</label>
+                      <div className="grid grid-cols-3 gap-2 mb-4">
                         {[30000, 50000, 100000, 500000, 1000000].map(val => (
                           <button 
                             key={val}
                             onClick={() => setApiSettings({ ...apiSettings, maxTokens: val, isUnlimited: false })}
-                            className={`p-2 rounded-lg border text-xs font-bold transition-all ${apiSettings.maxTokens === val && !apiSettings.isUnlimited ? 'bg-[#F9C6D4] text-white border-[#F9C6D4]' : 'bg-white text-[#777777] border-[#EACFD5]'}`}
+                            className={`p-2 rounded-lg border text-xs font-bold transition-all ${apiSettings.maxTokens === val && !apiSettings.isUnlimited ? 'bg-[#D18E9B] text-white border-[#D18E9B]' : 'bg-white text-[#777777] border-[#EACFD5]'}`}
                           >
                             {val.toLocaleString()}
                           </button>
@@ -3227,28 +3632,25 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                           type="number"
                           value={apiSettings.maxTokens || ''}
                           onChange={(e) => setApiSettings({ ...apiSettings, maxTokens: parseInt(e.target.value) || 0, isUnlimited: false })}
-                          className="w-full p-3 bg-[#FAF9F6] border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors text-sm"
+                          className="w-full scrapbook-input text-sm"
                           placeholder="Ví dụ: 1000000"
                         />
                       </div>
 
-                      <label className="flex items-center gap-3 cursor-pointer group">
-                        <div className="relative">
-                          <input 
-                            type="checkbox"
-                            checked={apiSettings.isUnlimited}
-                            onChange={(e) => setApiSettings({ ...apiSettings, isUnlimited: e.target.checked })}
-                            className="sr-only"
-                          />
-                          <div className={`w-10 h-6 rounded-full transition-colors ${apiSettings.isUnlimited ? 'bg-[#F9C6D4]' : 'bg-gray-200'}`} />
-                          <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${apiSettings.isUnlimited ? 'translate-x-4' : ''}`} />
+                      <div className="flex items-center gap-3 mt-4">
+                        <div 
+                          className="scrapbook-toggle"
+                          onClick={() => setApiSettings({ ...apiSettings, isUnlimited: !apiSettings.isUnlimited })}
+                        >
+                          <div className={`scrapbook-toggle-bg ${apiSettings.isUnlimited ? 'active' : ''}`} />
+                          <div className={`scrapbook-toggle-circle ${apiSettings.isUnlimited ? 'active' : ''}`} />
                         </div>
-                        <span className="text-sm font-bold text-[#555555]">Không giới hạn (Max Token Vĩnh Viễn - 4,000,000+)</span>
-                      </label>
+                        <span className="text-sm font-bold text-[#5C4A4A]">Không giới hạn (Max Token Vĩnh Viễn)</span>
+                      </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Thời gian dệt mộng mặc định (Phút)</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">Thời gian dệt mộng mặc định (Phút)</label>
                       <div className="flex items-center gap-4">
                         <input 
                           type="range"
@@ -3256,14 +3658,14 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                           max="100"
                           value={apiSettings.generationDuration || 2}
                           onChange={(e) => setApiSettings({ ...apiSettings, generationDuration: parseInt(e.target.value) })}
-                          className="flex-1 accent-[#F9C6D4]"
+                          className="flex-1 accent-[#D18E9B]"
                         />
-                        <span className="w-12 text-center font-bold text-[#F9C6D4]">{apiSettings.generationDuration}m</span>
+                        <span className="w-12 text-center font-bold text-[#D18E9B]">{apiSettings.generationDuration}m</span>
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider">Thời gian chờ tối đa (Phút)</label>
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">Thời gian chờ tối đa (Phút)</label>
                       <div className="flex items-center gap-4">
                         <input 
                           type="range"
@@ -3271,52 +3673,61 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                           max="30"
                           value={apiSettings.timeout}
                           onChange={(e) => setApiSettings({ ...apiSettings, timeout: parseInt(e.target.value) })}
-                          className="flex-1 accent-[#F9C6D4]"
+                          className="flex-1 accent-[#D18E9B]"
                         />
-                        <span className="w-12 text-center font-bold text-[#F9C6D4]">{apiSettings.timeout}m</span>
+                        <span className="w-12 text-center font-bold text-[#D18E9B]">{apiSettings.timeout}m</span>
                       </div>
-                      <p className="text-[10px] text-gray-400 italic">* Tăng thời gian chờ nếu bạn yêu cầu nội dung cực dài (100k+ token)</p>
+                    </div>
+
+                    <div className="scrapbook-card">
+                      <label className="scrapbook-title">
+                        <ListOrdered size={14} /> Tiến độ sắp xếp (50 nội dung)
+                      </label>
+                      <textarea 
+                        value={currentStory.progressSummary || ''}
+                        onChange={(e) => updateStory({ progressSummary: e.target.value })}
+                        className="w-full scrapbook-input h-40 resize-none text-xs"
+                        placeholder="Sắp xếp 50 nội dung từ đầu đến hiện tại, mỗi ý 150-200 ký tự..."
+                      />
                     </div>
 
                     {/* Secondary API Proxy Settings */}
-                    <div className="mt-8 pt-6 border-t border-[#EACFD5] space-y-6">
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-bold text-[#DB2777] uppercase tracking-wider">Secondary API Proxy (Phụ)</label>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input 
-                            type="checkbox" 
-                            checked={secondaryApiSettings.enabled}
-                            onChange={(e) => setSecondaryApiSettings({ ...secondaryApiSettings, enabled: e.target.checked })}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#DB2777]"></div>
-                        </label>
+                    <div className="scrapbook-card">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="scrapbook-title text-[#D18E9B]">Secondary API Proxy (Phụ)</label>
+                        <div 
+                          className="scrapbook-toggle"
+                          onClick={() => setSecondaryApiSettings({ ...secondaryApiSettings, enabled: !secondaryApiSettings.enabled })}
+                        >
+                          <div className={`scrapbook-toggle-bg ${secondaryApiSettings.enabled ? 'active' : ''}`} />
+                          <div className={`scrapbook-toggle-circle ${secondaryApiSettings.enabled ? 'active' : ''}`} />
+                        </div>
                       </div>
-                      <p className="text-[10px] text-gray-500 italic">Dùng riêng cho việc tóm tắt, ghi nhớ sự kiện và thẻ suy nghĩ nhân vật để giảm tải cho API chính.</p>
+                      <p className="text-[10px] text-gray-500 italic mb-4">Dùng riêng cho việc tóm tắt, ghi nhớ sự kiện và thẻ suy nghĩ nhân vật để giảm tải cho API chính.</p>
                       
                       {secondaryApiSettings.enabled && (
-                        <div className="space-y-4 bg-pink-50/50 p-4 rounded-xl border border-pink-100">
+                        <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                           <div className="space-y-2">
-                            <label className="text-xs font-bold text-[#777777] uppercase tracking-wider">API Key (Phụ)</label>
+                            <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">API Key (Phụ)</label>
                             <input 
                               type="password"
                               value={secondaryApiSettings.apiKey}
                               onChange={(e) => setSecondaryApiSettings({ ...secondaryApiSettings, apiKey: e.target.value })}
-                              className="w-full p-3 bg-white border border-[#EACFD5] rounded-xl outline-none focus:border-[#DB2777] transition-colors text-sm"
+                              className="w-full scrapbook-input text-sm"
                               placeholder="sk-..."
                             />
                           </div>
 
                           <div className="space-y-2">
-                            <label className="text-xs font-bold text-[#777777] uppercase tracking-wider">Proxy Endpoint (Phụ)</label>
+                            <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">Proxy Endpoint (Phụ)</label>
                             <input 
                               value={secondaryApiSettings.proxyEndpoint}
                               onChange={(e) => setSecondaryApiSettings({ ...secondaryApiSettings, proxyEndpoint: e.target.value })}
-                              className="w-full p-3 bg-white border border-[#EACFD5] rounded-xl outline-none focus:border-[#DB2777] transition-colors text-sm"
+                              className="w-full scrapbook-input text-sm"
                               placeholder="https://api.openai.com/v1/chat/completions"
                             />
                           </div>
-
+                          
                           <div className="space-y-2">
                             <div className="flex justify-between items-center">
                               <label className="text-xs font-bold text-[#777777] uppercase tracking-wider">Chọn Model (Phụ)</label>
@@ -3368,24 +3779,26 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                                   }
                                 }} 
                                 disabled={isFetchingSecondaryModels}
-                                className={`text-[10px] font-bold flex items-center gap-1 transition-all ${isFetchingSecondaryModels ? 'text-gray-400' : 'text-[#DB2777] hover:underline'}`}
+                                className={`text-[10px] font-bold flex items-center gap-1 transition-all ${isFetchingSecondaryModels ? 'text-gray-400' : 'text-[#D18E9B] hover:underline'}`}
                               >
                                 {isFetchingSecondaryModels ? 'Đang tải...' : 'Làm mới'}
                               </button>
                             </div>
-                            <div className="flex overflow-x-auto gap-2 pb-2 custom-scrollbar snap-x">
+                            <div className="flex overflow-x-auto gap-3 pb-2 custom-scrollbar snap-x">
                               {availableSecondaryModels.length === 0 ? (
-                                <div className="w-full p-3 border border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 gap-1 bg-white">
-                                  <span className="text-[10px]">Chưa có model. Hãy nhấn "Làm mới"</span>
+                                <div className="w-full p-4 border-2 border-dashed border-gray-100 rounded-xl flex flex-col items-center justify-center text-gray-400 gap-1">
+                                  <Bot size={20} />
+                                  <span className="text-[10px]">Chưa có model phụ. Nhấn "Làm mới"</span>
                                 </div>
                               ) : (
                                 availableSecondaryModels.map(m => (
                                   <button 
                                     key={m}
                                     onClick={() => setSecondaryApiSettings({ ...secondaryApiSettings, model: m })}
-                                    className={`flex-shrink-0 snap-start px-3 py-2 rounded-xl border transition-all flex flex-col items-center gap-1 min-w-[100px] ${secondaryApiSettings.model === m ? 'border-[#DB2777] bg-pink-100' : 'border-[#EACFD5] bg-white'}`}
+                                    className={`flex-shrink-0 snap-start px-4 py-3 rounded-xl border-2 transition-all flex flex-col items-center gap-1 min-w-[120px] ${secondaryApiSettings.model === m ? 'border-[#D18E9B] bg-[#FFF5F7]' : 'border-[#EACFD5] bg-white'}`}
                                   >
-                                    <span className={`text-[10px] font-bold truncate w-full text-center ${secondaryApiSettings.model === m ? 'text-[#DB2777]' : 'text-gray-600'}`}>{m}</span>
+                                    <Bot size={16} className={secondaryApiSettings.model === m ? 'text-[#D18E9B]' : 'text-gray-400'} />
+                                    <span className={`text-[10px] font-bold truncate w-full text-center ${secondaryApiSettings.model === m ? 'text-[#D18E9B]' : 'text-gray-600'}`}>{m}</span>
                                   </button>
                                 ))
                               )}
@@ -3395,7 +3808,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                               placeholder="Hoặc nhập tên Model phụ thủ công..." 
                               value={secondaryApiSettings.model} 
                               onChange={(e) => setSecondaryApiSettings({ ...secondaryApiSettings, model: e.target.value })} 
-                              className="w-full p-3 bg-white border border-[#EACFD5] rounded-xl outline-none focus:border-[#DB2777] transition-colors text-sm" 
+                              className="w-full scrapbook-input text-sm" 
                             />
                           </div>
                         </div>
@@ -3405,10 +3818,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 ) : (
                   <div className="space-y-6">
                     <div className="flex justify-between items-center">
-                      <h3 className="text-lg font-bold text-[#555555]">Quản lý System Prompt</h3>
+                      <h3 className="scrapbook-title text-lg">Quản lý System Prompt</h3>
                       <button 
                         onClick={clearPromptInputs}
-                        className="p-2 bg-[#F9C6D4] text-white rounded-full shadow-md hover:scale-110 transition-transform flex items-center gap-1 px-3"
+                        className="p-2 bg-[#D18E9B] text-white rounded-full shadow-md hover:scale-110 transition-transform flex items-center gap-1 px-3"
                         title="Thêm Prompt mới"
                       >
                         <Plus size={18} />
@@ -3416,37 +3829,39 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       </button>
                     </div>
 
-                    <div className="space-y-4 bg-[#FAF9F6] p-4 rounded-2xl border border-[#EACFD5] shadow-inner">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-[#777777] uppercase tracking-wider">Tên Prompt</label>
-                        <input 
-                          value={newPromptName}
-                          onChange={(e) => setNewPromptName(e.target.value)}
-                          className="w-full p-3 bg-white border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors text-sm"
-                          placeholder="VD: Phong cách u sầu"
-                        />
+                    <div className="scrapbook-card">
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">Tên Prompt</label>
+                          <input 
+                            value={newPromptName}
+                            onChange={(e) => setNewPromptName(e.target.value)}
+                            className="w-full scrapbook-input text-sm"
+                            placeholder="VD: Phong cách u sầu"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">Nội dung Prompt</label>
+                          <textarea 
+                            value={newPromptContent}
+                            onChange={(e) => setNewPromptContent(e.target.value)}
+                            className="w-full scrapbook-input text-sm h-32 resize-none"
+                            placeholder="Nhập hướng dẫn chi tiết cho AI..."
+                          />
+                        </div>
+                        <button 
+                          onClick={saveSystemPrompt}
+                          className="w-full py-3 bg-[#D18E9B] text-white rounded-xl font-bold shadow-sm hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                        >
+                          <Save size={18} />
+                          {editingPromptId ? 'Cập nhật Prompt' : 'Lưu vào trang trưng bày'}
+                        </button>
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-[#777777] uppercase tracking-wider">Nội dung Prompt</label>
-                        <textarea 
-                          value={newPromptContent}
-                          onChange={(e) => setNewPromptContent(e.target.value)}
-                          className="w-full p-3 bg-white border border-[#EACFD5] rounded-xl outline-none focus:border-[#F9C6D4] transition-colors text-sm h-32 resize-none"
-                          placeholder="Nhập hướng dẫn chi tiết cho AI..."
-                        />
-                      </div>
-                      <button 
-                        onClick={saveSystemPrompt}
-                        className="w-full py-3 bg-[#F9C6D4] text-white rounded-xl font-bold shadow-sm hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
-                      >
-                        <Save size={18} />
-                        {editingPromptId ? 'Cập nhật Prompt' : 'Lưu vào trang trưng bày'}
-                      </button>
                     </div>
 
                     <div className="space-y-3">
-                      <label className="text-sm font-bold text-[#777777] uppercase tracking-wider flex items-center gap-2">
-                        <Sparkles size={14} className="text-[#F9C6D4]" />
+                      <label className="scrapbook-title flex items-center gap-2">
+                        <Sparkles size={14} className="text-[#D18E9B]" />
                         Trang trưng bày Prompt
                       </label>
                       <div className="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
@@ -3454,13 +3869,13 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                           apiSettings.systemPrompts.map(prompt => (
                             <div 
                               key={prompt.id}
-                              className={`p-4 bg-white border rounded-xl flex justify-between items-start gap-4 transition-all group ${currentStory.systemPromptIds?.includes(prompt.id) ? 'border-[#F9C6D4] bg-[#F9C6D4]/5 shadow-sm' : 'border-[#EACFD5] hover:border-[#F9C6D4]'}`}
+                              className={`p-4 bg-white border rounded-xl flex justify-between items-start gap-4 transition-all group ${currentStory.systemPromptIds?.includes(prompt.id) ? 'border-[#D18E9B] bg-[#FFF5F7] shadow-sm' : 'border-[#EACFD5] hover:border-[#D18E9B]'}`}
                             >
                               <div className="flex-1 min-w-0 cursor-pointer" onClick={() => startEditingPrompt(prompt)}>
                                 <div className="flex items-center gap-2">
-                                  <h4 className="font-bold text-[#555555] truncate">{prompt.name}</h4>
+                                  <h4 className="font-bold text-[#5C4A4A] truncate">{prompt.name}</h4>
                                   {currentStory.systemPromptIds?.includes(prompt.id) && (
-                                    <span className="px-2 py-0.5 bg-[#F9C6D4] text-white text-[10px] rounded-full font-bold">Đang dùng</span>
+                                    <span className="px-2 py-0.5 bg-[#D18E9B] text-white text-[10px] rounded-full font-bold">Đang dùng</span>
                                   )}
                                 </div>
                                 <p className="text-xs text-[#777777] line-clamp-2 mt-1">{prompt.content}</p>
@@ -3478,14 +3893,14 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                                       showAlert('Thành công', `Đã liên kết văn phong "${prompt.name}"!`, 'success');
                                     }
                                   }}
-                                  className={`p-2 transition-colors ${currentStory.systemPromptIds?.includes(prompt.id) ? 'text-[#F9C6D4]' : 'text-gray-400 hover:text-[#F9C6D4]'}`}
+                                  className={`p-2 transition-colors ${currentStory.systemPromptIds?.includes(prompt.id) ? 'text-[#D18E9B]' : 'text-gray-400 hover:text-[#D18E9B]'}`}
                                   title={currentStory.systemPromptIds?.includes(prompt.id) ? "Huỷ liên kết" : "Liên kết với truyện hiện tại"}
                                 >
                                   <CheckCircle size={16} />
                                 </button>
                                 <button 
                                   onClick={() => startEditingPrompt(prompt)}
-                                  className="p-2 text-gray-400 hover:text-[#F9C6D4] transition-colors"
+                                  className="p-2 text-gray-400 hover:text-[#D18E9B] transition-colors"
                                   title="Chỉnh sửa"
                                 >
                                   <Settings size={16} />
@@ -4254,7 +4669,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                             } else if (activeImageSlot === 'cover') {
                               if (introStoryId) {
                                 const updatedStories = stories.map(s => s.id === introStoryId ? { ...s, cover: url } : s);
-                                setStories(updatedStories);
+                                setStories(prevStories => prevStories.map(s => s.id === introStoryId ? { ...s, cover: url } : s));
                                 const story = stories.find(s => s.id === introStoryId);
                                 if (story) saveKikokoStory({ ...story, cover: url });
                               }
@@ -4370,7 +4785,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
               <div className="flex-1 flex flex-col h-2/3 md:h-full bg-[#FFF5F7] relative">
                 {/* Generate Button Overlay */}
                 {!pinkStarData && !isFetchingPinkStar && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm z-10">
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/30 z-10">
                     <button 
                       onClick={async () => {
                         setIsFetchingPinkStar(true);
@@ -4465,7 +4880,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 )}
 
                 {isFetchingPinkStar && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm z-10 gap-4">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/30 z-10 gap-4">
                     <div className="w-12 h-12 border-4 border-pink-200 border-t-[#DB2777] rounded-full animate-spin" />
                     <div className="text-[#DB2777] font-serif font-bold animate-pulse">Đang thâm nhập tâm trí...</div>
                   </div>
@@ -4840,7 +5255,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                 {/* Intro Content */}
                 <div className="bg-white/60 backdrop-blur-md rounded-[40px] p-8 md:p-12 shadow-sm border border-pink-50 min-h-[400px] relative">
                   {isGeneratingIntro && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/40 backdrop-blur-sm z-10 rounded-[40px] gap-4">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/20 z-10 rounded-[40px] gap-4">
                       <div className="w-12 h-12 border-4 border-pink-100 border-t-pink-500 rounded-full animate-spin" />
                       <p className="text-pink-500 font-serif font-bold animate-pulse italic">Kikoko đang dệt nên những lời giới thiệu mộng mơ...</p>
                     </div>

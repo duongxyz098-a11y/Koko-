@@ -80,6 +80,146 @@
       linear-gradient(transparent 50%, rgba(255,255,255,.2) 50%);
     background-size: 40px 40px;
   }
+  .bg-scrapbook {
+    background-color: #FFF5F7;
+    background-image: radial-gradient(#E5DCDA 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  .scrapbook-card {
+    background-color: #FFFFFF;
+    border-radius: 20px;
+    border: 1px dashed #FFB6C1;
+    box-shadow: 4px 4px 0px #FFE4E8;
+    padding: 1.5rem;
+    position: relative;
+    transition: transform 0.2s;
+  }
+  .glass-bubble-card {
+    background-color: rgba(255, 240, 245, 0.85);
+    background-image: radial-gradient(#F9C6D4 1px, transparent 1px);
+    background-size: 15px 15px;
+    backdrop-filter: none;
+    border: none;
+    border-radius: 0;
+    padding: 2rem;
+    position: relative;
+    box-shadow: none;
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+  }
+  .scrapbook-card:hover {
+    transform: translateY(-2px);
+  }
+  .scrapbook-title {
+    color: #5C4A4A;
+    font-weight: bold;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+  .scrapbook-divider {
+    border-bottom: 2px dotted #FFE4E8;
+    width: 100%;
+    margin: 1rem 0;
+  }
+  .scrapbook-slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 6px;
+    background: #FCE4EC;
+    border-radius: 10px;
+    outline: none;
+  }
+  .scrapbook-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: #D18E9B;
+    cursor: pointer;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  .scrapbook-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: #D18E9B;
+    cursor: pointer;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  .scrapbook-tag {
+    background: #FFF0F3;
+    color: #5C4A4A;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: bold;
+  }
+  .scrapbook-input {
+    background: transparent;
+    border: 1px solid #E5DCDA;
+    border-radius: 12px;
+    padding: 0.75rem;
+    outline: none;
+    transition: all 0.2s;
+    line-height: 1.6;
+    color: #5C4A4A;
+    font-family: var(--font-serif);
+  }
+  .scrapbook-input:focus {
+    border-color: #FFB6C1;
+    background-color: rgba(255, 245, 247, 0.5);
+    box-shadow: 0 0 0 2px rgba(255, 182, 193, 0.2);
+  }
+  .scrapbook-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+  }
+  .scrapbook-toggle-bg {
+    width: 2.75rem;
+    height: 1.5rem;
+    background-color: #EAE4E4;
+    border-radius: 9999px;
+    transition: background-color 0.3s;
+  }
+  .scrapbook-toggle-bg.active {
+    background-color: #D18E9B;
+  }
+  .scrapbook-toggle-circle {
+    position: absolute;
+    top: 0.125rem;
+    left: 0.125rem;
+    width: 1.25rem;
+    height: 1.25rem;
+    background-color: white;
+    border-radius: 9999px;
+    transition: transform 0.3s;
+  }
+  .scrapbook-toggle-circle.active {
+    transform: translateX(1.25rem);
+  }
+  .scrapbook-dropdown {
+    background-color: #FFFFFF;
+    border: 1px solid #E5DCDA;
+    border-radius: 16px;
+    box-shadow: 4px 4px 0px #FFE4E8;
+    outline: none;
+    padding: 0.75rem;
+    color: #5C4A4A;
+    appearance: none;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
   .lace-border-large {
     height: 40px;
     background-image: url("data:image/svg+xml,%3Csvg width='100' height='40' viewBox='0 0 100 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 20c5 0 5-10 10-10s5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10z' fill='none' stroke='%23ffffff' stroke-width='4'/%3E%3Cpath d='M0 25c5 0 5-10 10-10s5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10z' fill='none' stroke='%23000000' stroke-width='2'/%3E%3Cpath d='M0 30c5 0 5-10 10-10s5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10 5-10 10-10 5 10 10 10z' fill='none' stroke='%23F9C6D4' stroke-width='2'/%3E%3C/svg%3E");

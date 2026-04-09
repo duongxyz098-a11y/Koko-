@@ -262,6 +262,10 @@ export default function KikokoNPCYouTube({
       - Nhân vật: ${activeProfile.name}
       - Tính cách/Thiết lập: ${activeProfile.description || activeProfile.bio || 'Không có'}
 
+      [VĂN HÓA VÀ QUỐC TỊCH]
+      - Hãy chú ý Quốc tịch của nhân vật (Nhật Bản, Trung Quốc, v.v.) trong phần Bối cảnh.
+      - Đảm bảo các video đề xuất phải phù hợp với văn hóa và ngôn ngữ của quốc gia đó, dù đang viết bằng tiếng Việt. Tránh các yếu tố đặc trưng của Việt Nam nếu nhân vật là người nước ngoài.
+
       YÊU CẦU:
       Tạo 30 video đề xuất trên YouTube phù hợp với sở thích, tính cách và hoàn cảnh của nhân vật ${activeProfile.name}.
       
@@ -344,6 +348,10 @@ export default function KikokoNPCYouTube({
       - Nhân vật: ${activeProfile.name}
       - Tính cách/Thiết lập: ${activeProfile.description || activeProfile.bio || 'Không có'}
 
+      [VĂN HÓA VÀ QUỐC TỊCH]
+      - Hãy chú ý Quốc tịch của nhân vật trong phần Bối cảnh.
+      - Các bài đăng cộng đồng phải phản ánh đúng văn hóa và thói quen của quốc gia đó.
+
       YÊU CẦU:
       Tạo 30 bài đăng cộng đồng (Community Posts) từ các kênh mà nhân vật ${activeProfile.name} đăng ký theo dõi.
       
@@ -407,6 +415,9 @@ export default function KikokoNPCYouTube({
       - Truyện: ${currentStory.plot}
       - Nhân vật: ${activeProfile.name}
       - Tính cách/Thiết lập: ${activeProfile.description || activeProfile.bio || 'Không có'}
+
+      [VĂN HÓA VÀ QUỐC TỊCH]
+      - Hãy chú ý Quốc tịch của nhân vật. Tên kênh phải mang phong cách của quốc gia đó (Nhật Bản, Trung Quốc, v.v.).
 
       YÊU CẦU:
       Tạo 200 tên kênh YouTube phù hợp với sở thích, tính cách và hoàn cảnh của nhân vật ${activeProfile.name}.
