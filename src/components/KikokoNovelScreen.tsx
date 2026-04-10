@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, 
@@ -145,6 +145,7 @@ interface KikokoStory {
   style: string;
   chapters: KikokoChapter[];
   background: string;
+  drawerBackground?: string;
   charLimit: number;
   tokenLimit: number;
   targetCharCount?: number;
@@ -698,7 +699,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const updateStory = async (updates: Partial<KikokoStory>) => {
+  const updateStory = useCallback(async (updates: Partial<KikokoStory>) => {
     if (!currentStoryId) return;
     
     setStories(prevStories => {
@@ -717,7 +718,11 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       
       return updatedStories;
     });
-  };
+  }, [currentStoryId]);
+
+  const handleCloseNPCNovelWriting = useCallback(() => {
+    setShowNPCNovelWriting(false);
+  }, []);
 
   const updateChapter = (updates: Partial<KikokoChapter>, index?: number) => {
     if (!currentStoryId) return;
@@ -746,6 +751,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         clearTimeout(saveTimeoutRef.current);
       }
       saveTimeoutRef.current = setTimeout(async () => {
+        // Save to IndexedDB
         await saveKikokoStory(updatedStories[storyIndex]);
       }, 1000);
       
@@ -4684,10 +4690,32 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             className="fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-[600] p-6 overflow-y-auto"
+            style={currentStory?.drawerBackground ? { backgroundImage: `url(${currentStory.drawerBackground})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' } : {}}
           >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold">Danh sách chương</h2>
-              <button onClick={() => setShowChapterDrawer(false)}><X /></button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                          const imageUrl = reader.result as string;
+                          updateStory({ drawerBackground: imageUrl });
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <ImageIcon size={20} className="text-stone-400 hover:text-pink-500 cursor-pointer" />
+                </div>
+                <button onClick={() => setShowChapterDrawer(false)}><X /></button>
+              </div>
             </div>
             <div className="space-y-2">
               {currentStory?.chapters?.map((chapter, index) => (
@@ -5360,7 +5388,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       <AnimatePresence>
         {showNPCNovelWriting && (
           <KikokoNPCNovelWriting 
-            onClose={() => setShowNPCNovelWriting(false)}
+            onClose={handleCloseNPCNovelWriting}
             apiSettings={apiSettings}
             secondaryApiSettings={secondaryApiSettings}
             currentStory={currentStory}
