@@ -32,7 +32,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<ApiSettingsData>(() => {
     const saved = localStorage.getItem('kotokoo_settings');
-    return saved ? JSON.parse(saved) : { endpoint: 'https://api.openai.com/v1', apiKey: '', model: '' };
+    return saved ? JSON.parse(saved) : { endpoint: 'https://api.openai.com/v1', apiKey: '', model: '', apiType: 'auto' };
   });
 
   useEffect(() => {

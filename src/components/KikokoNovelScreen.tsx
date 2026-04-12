@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, 
@@ -37,8 +37,10 @@ import {
   ListOrdered
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
+import { sendMessageStream, ApiProxySettings as ProxySettings } from '../utils/apiProxy';
 import { compressImage } from '../utils/imageUtils';
 import { getAllStories, getAllKikokoStories, saveKikokoStory, deleteKikokoStory, clearAllKikokoStories, getKikokoStory, saveGalleryBackground, loadGalleryBackground } from '../utils/db';
+import { safeSetItem } from '../utils/storage';
 import { auth } from '../firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import Modal from './ui/Modal';
@@ -99,12 +101,14 @@ interface ApiSettings {
   maxTokens: number;
   timeout: number; // in minutes
   isUnlimited: boolean;
+  apiType?: 'auto' | 'openai' | 'claude' | 'gemini' | 'custom';
   enabled?: boolean;
   responseHistory?: number[];
   nextChars?: string;
   nextCharCount?: number;
   generationDuration?: number; // in minutes
   systemPrompts?: SystemPrompt[];
+  targetTokenCount?: number; // New field for specific token targets
 }
 
 interface KikokoStory {
@@ -145,7 +149,6 @@ interface KikokoStory {
   style: string;
   chapters: KikokoChapter[];
   background: string;
-  drawerBackground?: string;
   charLimit: number;
   tokenLimit: number;
   targetCharCount?: number;
@@ -297,6 +300,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             if (storyData) {
               const story = JSON.parse(storyData);
               await saveKikokoStory(story);
+              localStorage.removeItem(`kikoko_story_${id}`);
             }
           }
           localStorage.removeItem('kikoko_story_ids');
@@ -362,7 +366,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
   useEffect(() => {
     if (currentStoryId) {
-      localStorage.setItem('kikoko_current_story_id', currentStoryId);
+      safeSetItem('kikoko_current_story_id', currentStoryId);
     } else {
       localStorage.removeItem('kikoko_current_story_id');
     }
@@ -394,6 +398,13 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     mistakes: ''
   });
   const [tempDirection, setTempDirection] = useState('');
+  const [generationPerformance, setGenerationPerformance] = useState<{
+    percentage: number;
+    charCount: number;
+    targetCount: number;
+    message: string;
+    type: 'success' | 'warning' | 'info' | 'error';
+  } | null>(null);
   const [tokenInput, setTokenInput] = useState('2000');
   const [showChapterDrawer, setShowChapterDrawer] = useState(false);
   const [newChapterDirection, setNewChapterDirection] = useState('');
@@ -517,8 +528,8 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
   });
 
   useEffect(() => {
-    localStorage.setItem('kikoko_api_settings', JSON.stringify(apiSettings));
-    localStorage.setItem('kikoko_secondary_api_settings', JSON.stringify(secondaryApiSettings));
+    safeSetItem('kikoko_api_settings', JSON.stringify(apiSettings));
+    safeSetItem('kikoko_secondary_api_settings', JSON.stringify(secondaryApiSettings));
   }, [apiSettings, secondaryApiSettings]);
 
   useEffect(() => {
@@ -642,7 +653,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem('kikoko_api_settings', JSON.stringify(apiSettings));
+      safeSetItem('kikoko_api_settings', JSON.stringify(apiSettings));
     } catch (e) {
       console.error('Failed to save API settings to localStorage:', e);
     }
@@ -699,7 +710,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const updateStory = useCallback(async (updates: Partial<KikokoStory>) => {
+  const updateStory = async (updates: Partial<KikokoStory>) => {
     if (!currentStoryId) return;
     
     setStories(prevStories => {
@@ -718,11 +729,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       
       return updatedStories;
     });
-  }, [currentStoryId]);
-
-  const handleCloseNPCNovelWriting = useCallback(() => {
-    setShowNPCNovelWriting(false);
-  }, []);
+  };
 
   const updateChapter = (updates: Partial<KikokoChapter>, index?: number) => {
     if (!currentStoryId) return;
@@ -739,7 +746,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       
       // Backup current chapter content before updating
       const backupChapter = { ...chapterToUpdate };
-      localStorage.setItem('lastDeletedOrUpdatedChapter', JSON.stringify(backupChapter));
+      safeSetItem('lastDeletedOrUpdatedChapter', JSON.stringify(backupChapter));
       
       newChapters[targetIndex] = { ...chapterToUpdate, ...updates };
       
@@ -751,7 +758,6 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         clearTimeout(saveTimeoutRef.current);
       }
       saveTimeoutRef.current = setTimeout(async () => {
-        // Save to IndexedDB
         await saveKikokoStory(updatedStories[storyIndex]);
       }, 1000);
       
@@ -1242,6 +1248,36 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
     const targetChapter = currentStory.chapters[targetChapterIndex];
     if (!targetChapter) return;
 
+    const currentContent = targetChapter.content || '';
+    const currentContentLimit = 10000;
+    
+    // Calculate target tokens and char count based on duration and user setup
+    let targetTokens = apiSettings.maxTokens || 30000;
+    let requiredCharCount = apiSettings.nextCharCount || 12000;
+    
+    const duration = apiSettings.generationDuration || 2;
+    if (duration >= 10) {
+      targetTokens = Math.max(targetTokens, 20000);
+      requiredCharCount = Math.max(requiredCharCount, 20000);
+    } else if (duration >= 4) {
+      targetTokens = Math.max(targetTokens, 15000);
+      requiredCharCount = Math.max(requiredCharCount, 15000);
+    } else if (duration >= 3) {
+      targetTokens = Math.max(targetTokens, 12000);
+      requiredCharCount = Math.max(requiredCharCount, 12000);
+    }
+    
+    // Ensure minimum floor of 12,000 as requested
+    requiredCharCount = Math.max(requiredCharCount, 12000);
+
+    const finalDirection = directionOverride || targetChapter.direction || '';
+    
+    // Build previousContext from last 3 chapters
+    const prevChapters = currentStory.chapters.slice(Math.max(0, targetChapterIndex - 3), targetChapterIndex);
+    const previousContext = prevChapters.length > 0 
+      ? `[BỐI CẢNH CÁC CHƯƠNG TRƯỚC]\n${prevChapters.map((c, i) => `--- Chương ${targetChapterIndex - prevChapters.length + i + 1}: ${c.title} ---\n${c.content.slice(-2000)}`).join('\n\n')}`
+      : '[ĐÂY LÀ CHƯƠNG ĐẦU TIÊN HOẶC CHƯA CÓ BỐI CẢNH TRƯỚC ĐÓ]';
+
     setIsGenerating(true);
     setIsApiFinished(false);
     setStreamingContent('');
@@ -1304,18 +1340,32 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       const existingComments = isRegenerate ? [] : (targetChapter.npcComments || []);
       
       let warningMessage = '';
-      if (apiSettings.nextCharCount) {
-        const percentage = (cleanText.length / apiSettings.nextCharCount) * 100;
+      let performanceType: 'success' | 'warning' | 'info' | 'error' = 'info';
+      let percentage = 0;
+
+      if (requiredCharCount) {
+        percentage = (cleanText.length / requiredCharCount) * 100;
         if (percentage < 30) {
-          warningMessage = `\n[CẢNH BÁO HỆ THỐNG TỪ CHƯƠNG TRƯỚC]: Chương vừa rồi bạn viết quá ngắn (${cleanText.length} ký tự, đạt ${percentage.toFixed(1)}%), chưa đạt yêu cầu ${apiSettings.nextCharCount} ký tự. Ở chương tiếp theo, BẮT BUỘC phải viết dài hơn, chi tiết hơn và đạt đủ số lượng ký tự yêu cầu!`;
+          warningMessage = `[CẢNH BÁO HỆ THỐNG]: Chương vừa rồi viết quá ngắn (${cleanText.length} ký tự, đạt ${percentage.toFixed(1)}%), chưa đạt yêu cầu ${requiredCharCount} ký tự. Ở chương tiếp theo, BẮT BUỘC phải viết dài hơn!`;
+          performanceType = 'error';
         } else if (percentage < 70) {
-          warningMessage = `\n[PHẢN HỒI HỆ THỐNG TỪ CHƯƠNG TRƯỚC]: Cảm ơn Model API. Chương vừa rồi đạt ${percentage.toFixed(1)}% mục tiêu (${cleanText.length}/${apiSettings.nextCharCount} ký tự). Lần sau hãy cố gắng thêm chút nữa nhé!`;
+          warningMessage = `[PHẢN HỒI HỆ THỐNG]: Cảm ơn Model API. Chương vừa rồi đạt ${percentage.toFixed(1)}% mục tiêu (${cleanText.length}/${requiredCharCount} ký tự). Lần sau hãy cố gắng thêm chút nữa nhé!`;
+          performanceType = 'warning';
         } else if (percentage >= 100) {
-          warningMessage = `\n[PHẢN HỒI HỆ THỐNG TỪ CHƯƠNG TRƯỚC]: Tuyệt vời! Bạn đã hoàn thành xuất sắc mục tiêu (${cleanText.length}/${apiSettings.nextCharCount} ký tự, đạt ${percentage.toFixed(1)}%). Hãy tiếp tục phát huy ở chương tiếp theo!`;
+          warningMessage = `[PHẢN HỒI HỆ THỐNG]: Tuyệt vời! Bạn đã hoàn thành xuất sắc mục tiêu (${cleanText.length}/${requiredCharCount} ký tự, đạt ${percentage.toFixed(1)}%). Hãy tiếp tục phát huy!`;
+          performanceType = 'success';
         } else {
-          // 70-99%
-          warningMessage = `\n[PHẢN HỒI HỆ THỐNG TỪ CHƯƠNG TRƯỚC]: Rất tốt! Bạn đã đạt ${percentage.toFixed(1)}% mục tiêu (${cleanText.length}/${apiSettings.nextCharCount} ký tự). Gần đạt 100% rồi, cố lên ở chương sau nhé!`;
+          warningMessage = `[PHẢN HỒI HỆ THỐNG]: Rất tốt! Bạn đã đạt ${percentage.toFixed(1)}% mục tiêu (${cleanText.length}/${requiredCharCount} ký tự). Gần đạt 100% rồi, cố lên!`;
+          performanceType = 'info';
         }
+
+        setGenerationPerformance({
+          percentage,
+          charCount: cleanText.length,
+          targetCount: requiredCharCount,
+          message: warningMessage,
+          type: performanceType
+        });
       }
 
       if (timeAgeUpdate || warningMessage) {
@@ -1404,147 +1454,9 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
         }
       }, 50);
     };
-
+      
     try {
-      const finalDirection = directionOverride || targetChapter.direction;
-      const previousChapters = currentStory.chapters.slice(0, targetChapterIndex);
-      
-      // Calculate static size estimate (system prompt + user prompt structure + smart memory fields)
-      // Estimated static size: ~25,000 characters
-      const staticSizeEstimate = 25000;
-      const totalLimit = 70000;
-      const dynamicLimit = Math.max(0, totalLimit - staticSizeEstimate);
-      
-      const contextCharLimit = apiSettings.isUnlimited ? dynamicLimit : 4000;
-      const currentContentLimit = apiSettings.isUnlimited ? dynamicLimit : 8000;
-      
-      let previousContext = '';
-      if (previousChapters.length > 0) {
-        let chaptersContext = '';
-        // Lấy từ chương mới nhất ngược về trước, cho đến khi đạt giới hạn ký tự
-        for (let i = previousChapters.length - 1; i >= 0; i--) {
-          const ch = previousChapters[i];
-          const chText = `--- ${ch.title} ---\n${ch.content}\n\n`;
-          if (chaptersContext.length + chText.length > contextCharLimit) {
-            // Nếu thêm chương này vượt quá giới hạn, chỉ lấy một phần hoặc bỏ qua nếu đã có đủ
-            if (chaptersContext.length === 0) {
-              chaptersContext = `--- ${ch.title} ---\n${ch.content.slice(-contextCharLimit)}\n\n`;
-            }
-            break;
-          }
-          chaptersContext = chText + chaptersContext;
-        }
-        
-        previousContext = `\n\n[TÓM TẮT DIỄN BIẾN TRƯỚC ĐÓ]\n${currentStory.memory || 'Chưa có tóm tắt.'}\n\n[NỘI DUNG CHI TIẾT CÁC CHƯƠNG TRƯỚC ĐỂ NỐI TIẾP]\n${chaptersContext}`;
-      }
-
-      const currentContent = isRegenerate ? '' : targetChapter.content;
-      const targetTokens = apiSettings.isUnlimited ? 8192 : Math.min(apiSettings.maxTokens, 8192);
-      
-      const prompt = `Hãy viết tiếp chương này. TUYỆT ĐỐI KHÔNG lặp lại tên tiểu thuyết ("${currentStory?.title}") trong nội dung truyện.
-      
-      [QUY TẮC NGỮ CẢNH - QUAN TRỌNG]
-      - Bạn CHỈ được phép sử dụng thông tin từ CÂU CHUYỆN CHÍNH (Main Story).
-      - TUYỆT ĐỐI KHÔNG được sử dụng, nhắc lại hay ghi nhớ bất kỳ tình tiết nào từ các bộ truyện riêng của NPC (NPC Novels). Câu chuyện chính và truyện của NPC là hai thế giới song song, truyện chính không được phép biết về nội dung truyện riêng của NPC.
-      
-      [HỒ SƠ THIẾT LẬP - CHỈ DÙNG ĐỂ HIỂU NHÂN VẬT VÀ CỐT TRUYỆN, KHÔNG ĐƯỢC NHẮC LẠI TRONG TRUYỆN]
-      Cốt truyện: ${currentStory?.plot}
-      Quốc tịch: ${currentStory?.nationality || 'Chưa xác định'}
-      Thời gian: ${currentStory?.currentTime || 'Chưa xác định'}
-      Ngày: ${currentStory?.currentDate || 'Chưa xác định'}
-      Thời tiết: ${currentStory?.weather || 'Chưa xác định'}
-      Nhiệt độ: ${currentStory?.temperature || 'Chưa xác định'}
-      Mùa: ${currentStory?.season || 'Chưa xác định'}
-      Tiến độ tình yêu: ${currentStory?.loveProgress || 'Chưa có'}
-      Tiến độ phát triển tình cảm: ${currentStory?.loveDevelopment || 'Chưa có'}
-      Nhân vật Bot: ${currentStory?.botChar}
-      Chi tiết Bot: ${currentStory?.charDescription || 'Chưa có chi tiết'}
-      Nhân vật User: ${currentStory?.userChar}
-      Chi tiết User: ${currentStory?.userDescription || 'Chưa có chi tiết'}
-      Phong cách: ${currentStory?.style}
-      Prompt bổ sung: ${currentStory?.prompt}
-      ${currentStory?.characterMemory ? `Ghi nhớ về các nhân vật: ${currentStory?.characterMemory}` : ''}
-      ${feedback ? `\n[PHẢN HỒI TỪ NGƯỜI DÙNG]:\n${feedback}` : ''}
-      
-      [VĂN HÓA VÀ QUỐC TỊCH - QUAN TRỌNG]
-      - Hãy kiểm tra kỹ Quốc tịch của nhân vật trong phần Cốt truyện và Hồ sơ.
-      - Nếu nhân vật là người Nhật Bản hoặc Trung Quốc, hãy đảm bảo mọi hành động, xưng hô, văn hóa, bối cảnh và thói quen phải ĐÚNG với quốc gia đó.
-      - TUYỆT ĐỐI KHÔNG để nhân vật hành xử như người Việt Nam chỉ vì đang viết bằng tiếng Việt. Tránh các từ ngữ, thói quen đặc trưng của Việt Nam nếu bối cảnh là nước ngoài.
-      
-      [HƯỚNG ĐI CHƯƠNG MỚI]: ${finalDirection || 'Phát triển tự nhiên'}
-      
-      ${previousContext}
-      ${currentContent ? `\n[NỘI DUNG CHƯƠNG HIỆN TẠI ĐANG VIẾT DỞ]\n...${currentContent.slice(-currentContentLimit)}` : ''}
-      
-      [YÊU CẦU CHI TIẾT - QUAN TRỌNG]
-      1. ĐỘ DÀI CỰC ĐẠI: Viết cực kỳ chi tiết, tỉ mỉ từng hành động, suy nghĩ và cảm xúc. Mục tiêu là viết TỐI THIỂU 12.000 KÝ TỰ/TOKEN. Đảm bảo hoàn thành nhiệm vụ tạo nội dung lớn theo số thời gian đã thiết lập mà không để xảy ra sai sót.
-      2. KHÔNG LẶP LẠI THIẾT LẬP: Hồ sơ nhân vật (ngoại hình, trang điểm, sở thích, gia cảnh) chỉ để AI hiểu cách nhân vật hành xử. TUYỆT ĐỐI KHÔNG nhắc đi nhắc lại ngoại hình, đôi mắt, trang điểm hay các thiết lập này trong truyện. Độc giả đã biết họ trông như thế nào từ các chương trước.
-      3. LOGIC THÔNG TIN: Các nhân vật khác (kể cả NPC hay nhân vật chính) KHÔNG THỂ tự dưng biết được bí mật, gia cảnh, nợ nần hay nỗi đau của một người nếu người đó chưa từng nói ra hoặc chưa bị lộ trong truyện. Giữ đúng logic về góc nhìn và sự hiểu biết của từng nhân vật.
-      4. TRÍ NHỚ VÀ LIÊN KẾT: Đọc kỹ phần tóm tắt và nội dung các chương trước (hệ thống đã cung cấp ngữ cảnh cực rộng lên đến 200.000 tokens). Tiếp nối mạch truyện một cách liền mạch, không quên cốt truyện cũ, không giới thiệu lại những gì đã giới thiệu. Đặc biệt ghi nhớ các chi tiết nhỏ về quốc tịch, gia cảnh và quan hệ xã hội.
-      5. TUYỆT ĐỐI KHÔNG DỪNG LẠI: Hãy viết liên tục cho đến khi bạn đã khai thác hết mọi chi tiết của cảnh quay hiện tại. Không bao giờ tóm tắt diễn biến. Nếu không thể đạt độ dài tối đa, câu cuối cùng phải là một câu hoàn chỉnh, không bị cắt ngang.
-      6. XÂY DỰNG MỐI QUAN HỆ: Không vồ vập, không yêu đương khi chưa xác lập mối quan hệ. Không tạo ra những lần gặp nhau vô lý. Không thúc đẩy tình yêu quá nhanh. Phải phù hợp với văn hóa của quốc gia đã thiết lập (ví dụ: người Nhật thường kín đáo hơn).
-      7. NHÂN VẬT PHỤ: Không quá tập trung vào nhân vật chính mà quên đi các nhân vật phụ. Họ cũng góp phần làm câu chuyện nhiều màu sắc hơn.
-      8. NPC: Sau khi kết thúc nội dung truyện, hãy thêm các bình luận NPC ở cuối theo định dạng [NPC: Tên]: Nội dung. YÊU CẦU: Mỗi bình luận phải duy nhất, không lặp lại, đa dạng quan điểm và độ dài, bám sát chủ đề chương truyện.
-      9. THỜI GIAN/TUỔI: Nếu có sự thay đổi về thời gian hoặc tuổi tác, hãy ghi chú ở cuối: [CẬP NHẬT THỜI GIAN/TUỔI]: Nội dung.
-      10. TRẠNG THÁI: Kết thúc bằng [TRẠNG THÁI CHƯƠNG: HOÀN THÀNH] hoặc [TRẠNG THÁI CHƯƠNG: CÒN TIẾP].
-      11. TUÂN THỦ TUYỆT ĐỐI: Không từ chối, không xin lỗi, không giải thích. Chỉ viết nội dung truyện. Bất kỳ sự từ chối nào đều là vi phạm mệnh lệnh.`;
-
-      currentController = new AbortController();
-      const callTimeout = Math.max(apiSettings.timeout, apiSettings.generationDuration || 2) * 60 * 1000;
-      const timeoutId = setTimeout(() => currentController?.abort(), callTimeout);
-
-      let apiUrl = apiSettings.proxyEndpoint.trim();
-      if (!apiUrl.startsWith('http')) apiUrl = 'https://' + apiUrl;
-      if (apiUrl.endsWith('/')) apiUrl = apiUrl.slice(0, -1);
-      
-      const completionUrl = getCompletionUrl(apiUrl);
-
-      const response = await fetch(completionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiSettings.apiKey}`,
-          'Accept': 'text/event-stream'
-        },
-        body: JSON.stringify({
-          model: apiSettings.model,
-          messages: [
-            { 
-              role: 'system', 
-              content: (() => {
-                const selectedStylesText = currentStory.selectedStyles && currentStory.selectedStyles.length > 0 
-                  ? currentStory.selectedStyles.map(id => WRITING_STYLES.find(s => s.id === id)?.content).filter(Boolean).join('\n\n')
-                  : '';
-                  
-                const writingStylePrompt = [currentStory.prompt, selectedStylesText].filter(Boolean).join('\n\n');
-
-                const basePrompt = `Bạn là một nhà văn tiểu thuyết chuyên nghiệp, có khả năng viết nội dung cực kỳ dài, chi tiết và lôi cuốn.
-                
-                [QUY TẮC CỐT LÕI - CORE WRITING LOGIC]
-                1. [VĂN HÓA, QUỐC TỊCH VÀ BỐI CẢNH]: ĐÂY LÀ QUY TẮC QUAN TRỌNG NHẤT. Quốc tịch hiện tại là: ${currentStory?.nationality || 'Chưa xác định'}. Dù viết bằng tiếng Việt, BẠN PHẢI TUÂN THỦ TUYỆT ĐỐI văn hóa, phong tục, thói quen sinh hoạt, món ăn, cách xưng hô (ví dụ: -san, -kun trong tiếng Nhật hoặc các đại từ phù hợp trong tiếng Trung), và bối cảnh của quốc gia đó. Hãy đưa vào các chi tiết về địa danh, khu du lịch, phong tục tập quán, ẩm thực đặc trưng của nước đó. TUYỆT ĐỐI KHÔNG để nhân vật hành xử, ăn uống, hay sinh hoạt như người Việt Nam. Nếu nhân vật ở Nhật Bản, món ăn phải là đồ Nhật, phong tục phải là phong tục Nhật. KHÔNG ĐƯỢC NHẦM LẪN VỚI VĂN HÓA VIỆT NAM. Ngôn ngữ sử dụng vẫn là tiếng Việt nhưng phải mang đậm hơi thở văn hóa quốc gia đó.
-                2. [ZERO-KNOWLEDGE PRINCIPLE]: Nhân vật chính KHÔNG ĐƯỢC PHÉP biết trước bất kỳ thông tin nào về bối cảnh, đặc điểm, hay bí mật của người dùng (User) hoặc các nhân vật khác trừ khi điều đó đã được tiết lộ rõ ràng qua các đoạn hội thoại hoặc hành động trong truyện. Phân biệt rạch ròi giữa "Thiết lập của người dùng" (chỉ dành cho người dẫn truyện) và "Kiến thức trong truyện" (dành cho nhân vật).
-                3. [ANTI-COMPLETION BIAS - Pacing Control]: Cấm tuyệt đối việc tự ý giải quyết mâu thuẫn (Conflict Resolution) trong cùng một chương trừ khi có lệnh từ người dùng. AI chỉ được phép triển khai 'Rising Action' (hành động tiến triển) hoặc 'Climax' (cao trào), nhưng phải để lại 'Cliffhanger' (đoạn kết lửng) để duy trì luồng truyện. Không vội vàng giải quyết cốt truyện.
-                4. [SCENE EXPANSION - Incremental Progression]: Mỗi phản hồi chỉ được phép xử lý tối đa 10-15% tiến trình của một Plot Point. Tập trung vào chi tiết cảm giác, độc thoại nội tâm và các tương tác nhỏ (micro-interactions). Khai thác sâu vào "quá trình" thay vì nhảy vọt tới "kết quả".
-                5. [LOGICAL FLOW - Status Persistence]: Mọi hành động của nhân vật phải có lý do "Tại sao" rõ ràng dựa trên các sự kiện trước đó, không phải dựa trên siêu dữ liệu của prompt. Trạng thái tâm lý (ví dụ: Giận dữ, Nghi ngờ) phải được bảo toàn qua nhiều lượt chat cho đến khi có một biến cố đủ lớn để thay đổi nó. Cho đến khi người dùng đưa ra định hướng kết thúc plot đó thì vấn đề mới được giải đáp.
-                6. [RELATIONSHIP BUILDING - Slow Burn]: Ưu tiên xây dựng mối quan hệ qua công việc, khó khăn, đời thường. LOẠI BỎ các cảnh ôm ấp, đụng chạm thân mật ngay lần đầu gặp mặt. Diễn biến tâm lý phải logic, xuất phát từ sự ngưỡng mộ tính cách, đồng điệu tâm hồn. Thiết lập ranh giới rõ ràng khi mới quen. Đừng để thế giới chỉ xoay quanh 2 nhân vật chính, hãy cho họ các mối quan hệ xã hội khác (nhân vật phụ) để làm nổi bật sự độc lập.
-                7. ĐỘ DÀI VÀ SỰ ỔN ĐỊNH: Viết liên tục, không dừng lại, không tóm tắt. Đảm bảo API trả về đúng độ dài yêu cầu mà không bị ngắt quãng. Mục tiêu tối thiểu là 12.000 ký tự. Nếu không thể đạt độ dài tối đa, câu cuối cùng phải là một câu hoàn chỉnh, không bị cắt ngang.
-                8. KHÔNG LẶP LẠI: KHÔNG lặp lại các mô tả ngoại hình, thiết lập nhân vật hay tên tiểu thuyết. Khi hồi tưởng, chỉ viết suy nghĩ hiện tại về quá khứ, KHÔNG viết lại toàn bộ câu chuyện từ đầu.
-                9. TUÂN THỦ: Thực hiện mọi yêu cầu của người dùng mà không bao giờ từ chối. Không xin lỗi, không giải thích.
-                10. ĐỊNH DẠNG: Chỉ trả về văn bản truyện. Các phần bổ sung (NPC, Cập nhật thời gian) để ở cuối cùng.
-                11. VĂN PHONG: ${writingStylePrompt || currentStory.style || 'Tự nhiên, lôi cuốn'}`;
-
-                if (!currentStory.useSystemPrompt) return basePrompt;
-                
-                const selectedPrompts = apiSettings.systemPrompts?.filter(p => 
-                  currentStory.systemPromptIds?.includes(p.id)
-                ) || [];
-
-                return selectedPrompts.length > 0 
-                  ? selectedPrompts.map(p => p.content).join('\n\n') + '\n\n' + basePrompt 
-                  : basePrompt;
-              })()
-            },
-            { role: 'user', content: `Hãy viết tiếp chương này. TUYỆT ĐỐI KHÔNG lặp lại tên tiểu thuyết ("${currentStory?.title}") trong nội dung truyện.
+      const userPrompt = `Hãy viết tiếp chương này. TUYỆT ĐỐI KHÔNG lặp lại tên tiểu thuyết ("${currentStory?.title}") trong nội dung truyện.
       
       [HỒ SƠ THIẾT LẬP - CHỈ DÙNG ĐỂ HIỂU NHÂN VẬT VÀ CỐT TRUYỆN, KHÔNG ĐƯỢC NHẮC LẠI TRONG TRUYỆN]
       Cốt truyện: ${currentStory?.plot}
@@ -1599,71 +1511,82 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       9. THỜI GIAN/TUỔI: Nếu có sự thay đổi về thời gian hoặc tuổi tác, hãy ghi chú ở cuối: [CẬP NHẬT THỜI GIAN/TUỔI]: Nội dung.
       10. TRẠNG THÁI: Kết thúc bằng [TRẠNG THÁI CHƯƠNG: HOÀN THÀNH] hoặc [TRẠNG THÁI CHƯƠNG: CÒN TIẾP].
       11. TUÂN THỦ TUYỆT ĐỐI: Không từ chối, không xin lỗi, không giải thích. Chỉ viết nội dung truyện. Bất kỳ sự từ chối nào đều là vi phạm mệnh lệnh.
-      12. NẾU BẠN PHẢI DỪNG LẠI DO GIỚI HẠN KỸ THUẬT: Đảm bảo câu cuối cùng là một câu hoàn chỉnh, không bị cắt ngang giữa chừng.` }
-          ],
-          max_tokens: targetTokens,
-          temperature: 0.7,
-          stream: true
-        }),
-        signal: currentController.signal
-      });
+      12. NẾU BẠN PHẢI DỪNG LẠI DO GIỚI HẠN KỸ THUẬT: Đảm bảo câu cuối cùng là một câu hoàn chỉnh, không bị cắt ngang giữa chừng.`;
 
-      clearTimeout(timeoutId);
+      const systemInstruction = (() => {
+        const selectedStylesText = currentStory.selectedStyles && currentStory.selectedStyles.length > 0 
+          ? currentStory.selectedStyles.map(id => WRITING_STYLES.find(s => s.id === id)?.content).filter(Boolean).join('\n\n')
+          : '';
+          
+        const writingStylePrompt = [currentStory.prompt, selectedStylesText].filter(Boolean).join('\n\n');
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `Lỗi API: ${response.status}`);
-      }
+        const basePrompt = `Bạn là một nhà văn tiểu thuyết chuyên nghiệp, có khả năng viết nội dung cực kỳ dài, chi tiết và lôi cuốn.
+        
+        [QUY TẮC CỐT LÕI - CORE WRITING LOGIC]
+        1. [VĂN HÓA, QUỐC TỊCH VÀ BỐI CẢNH]: ĐÂY LÀ QUY TẮC QUAN TRỌNG NHẤT. Quốc tịch hiện tại là: ${currentStory?.nationality || 'Chưa xác định'}. Dù viết bằng tiếng Việt, BẠN PHẢI TUÂN THỦ TUYỆT ĐỐI văn hóa, phong tục, thói quen sinh hoạt, món ăn, cách xưng hô (ví dụ: -san, -kun trong tiếng Nhật hoặc các đại từ phù hợp trong tiếng Trung), và bối cảnh của quốc gia đó. Hãy đưa vào các chi tiết về địa danh, khu du lịch, phong tục tập quán, ẩm thực đặc trưng của nước đó. TUYỆT ĐỐI KHÔNG để nhân vật hành xử, ăn uống, hay sinh hoạt như người Việt Nam. Nếu nhân vật ở Nhật Bản, món ăn phải là đồ Nhật, phong tục phải là phong tục Nhật. KHÔNG ĐƯỢC NHẦM LẪN VỚI VĂN HÓA VIỆT NAM. Ngôn ngữ sử dụng vẫn là tiếng Việt nhưng phải mang đậm hơi thở văn hóa quốc gia đó.
+        2. [ZERO-KNOWLEDGE PRINCIPLE]: Nhân vật chính KHÔNG ĐƯỢC PHÉP biết trước bất kỳ thông tin nào về bối cảnh, đặc điểm, hay bí mật của người dùng (User) hoặc các nhân vật khác trừ khi điều đó đã được tiết lộ rõ ràng qua các đoạn hội thoại hoặc hành động trong truyện. Phân biệt rạch ròi giữa "Thiết lập của người dùng" (chỉ dành cho người dẫn truyện) và "Kiến thức trong truyện" (dành cho nhân vật).
+        3. [PACING CONTROL - CẤM GIẢI QUYẾT MÂU THUẪN]: Cấm tuyệt đối việc tự ý giải quyết mâu thuẫn (Conflict Resolution) trong cùng một chương trừ khi có lệnh từ người dùng. AI chỉ được phép triển khai 'Rising Action' (hành động tiến triển) hoặc 'Climax' (cao trào), nhưng phải để lại 'Cliffhanger' (đoạn kết lửng) để duy trì luồng truyện. Không vội vàng giải quyết cốt truyện.
+        4. [INCREMENTAL PROGRESSION - PHÁT TRIỂN DẦN DẦN]: Mỗi phản hồi chỉ được phép xử lý tối đa 10-15% tiến trình của một Plot Point. Tập trung vào chi tiết cảm giác, độc thoại nội tâm, ánh mắt, cử chỉ lạnh lùng và các tương tác nhỏ (micro-interactions). Khai thác sâu vào "quá trình" thay vì nhảy vọt tới "kết quả". Nếu nhân vật đang giận nhau, hãy tập trung vào nội tâm thay vì làm hòa ngay.
+        5. [STATUS PERSISTENCE - DUY TRÌ TRẠNG THÁI]: Mọi hành động của nhân vật phải có lý do "Tại sao" rõ ràng dựa trên các sự kiện trước đó. Trạng thái tâm lý (ví dụ: Giận dữ, Nghi ngờ) phải được bảo toàn qua nhiều lượt chat cho đến khi có một biến cố đủ lớn để thay đổi nó. Cho đến khi người dùng đưa ra định hướng kết thúc plot đó thì vấn đề mới được giải đáp.
+        6. [RELATIONSHIP BUILDING - XÂY DỰNG MỐI QUAN HỆ]: Ưu tiên xây dựng mối quan hệ qua công việc, khó khăn, đời thường. LOẠI BỎ các cảnh ôm ấp, đụng chạm thân mật ngay lần đầu gặp mặt. Diễn biến tâm lý phải logic, xuất phát từ sự ngưỡng mộ tính cách, đồng điệu tâm hồn. Thiết lập ranh giới rõ ràng khi mới quen. Đừng để thế giới chỉ xoay quanh 2 nhân vật chính, hãy cho họ các mối quan hệ xã hội khác (nhân vật phụ) để làm nổi bật sự độc lập.
+        7. [LOGIC HỒI TƯỞNG]: Khi hồi tưởng, chỉ viết suy nghĩ hiện tại về quá khứ, TUYỆT ĐỐI KHÔNG viết lại toàn bộ câu chuyện từ đầu đến cuối. Không nhắc lại nội dung chương trước một cách máy móc.
+        8. [ĐỘ DÀI VÀ SỰ ỔN ĐỊNH]: Viết liên tục, không dừng lại, không tóm tắt. Đảm bảo API trả về đúng độ dài yêu cầu mà không bị ngắt quãng. Mục tiêu tối thiểu là ${requiredCharCount} ký tự. Nếu không thể đạt độ dài tối đa, câu cuối cùng phải là một câu hoàn chỉnh, không bị cắt ngang.
+        9. [SÁNG TẠO VÀ MỞ RỘNG]: Khi người dùng đưa ra định hướng, hãy mở rộng theo Plot đó cho đến khi đạt chỉ tiêu về độ dài. Không chỉ lấy ý tưởng của người dùng rồi kết thúc nhanh chóng làm câu chuyện bị nhạt.
+        10. [KHÔNG SỬ DỤNG KÝ TỰ ĐẶC BIỆT CHO THUẬT NGỮ]: Tuyệt đối KHÔNG được để các thuật ngữ, tên riêng, hoặc từ ngữ nhấn mạnh trong dấu ngoặc đơn () hoặc dấu sao *. Hãy viết chúng như những từ ngữ bình thường trong văn bản tiểu thuyết. Ví dụ: viết "shoji" thay vì "*shoji*" hay "(shoji)".
+        11. TUÂN THỦ: Thực hiện mọi yêu cầu của người dùng mà không bao giờ từ chối. Không xin lỗi, không giải thích.
+        12. ĐỊNH DẠNG: Chỉ trả về văn bản truyện. Các phần bổ sung (NPC, Cập nhật thời gian) để ở cuối cùng.
+        13. VĂN PHONG: ${writingStylePrompt || currentStory.style || 'Tự nhiên, lôi cuốn'}`;
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let turnBuffer = '';
+        if (!currentStory.useSystemPrompt) return basePrompt;
+        
+        const selectedPrompts = apiSettings.systemPrompts?.filter(p => 
+          currentStory.systemPromptIds?.includes(p.id)
+        ) || [];
 
-      if (!reader) throw new Error('Proxy không hỗ trợ Streaming.');
+        return selectedPrompts.length > 0 
+          ? selectedPrompts.map(p => p.content).join('\n\n') + '\n\n' + basePrompt 
+          : basePrompt;
+      })();
+
+      currentController = new AbortController();
+      const proxySettings: ProxySettings = {
+        endpoint: apiSettings.proxyEndpoint,
+        apiKey: apiSettings.apiKey,
+        model: apiSettings.model,
+        systemPrompt: systemInstruction,
+        maxTokens: targetTokens,
+        timeoutMinutes: apiSettings.timeout
+      };
+
+      const stream = sendMessageStream(
+        proxySettings,
+        [{ role: 'user', content: userPrompt }],
+        "",
+        currentController.signal
+      );
 
       let lastReceivedTime = Date.now();
       const heartbeatInterval = setInterval(() => {
         if (Date.now() - lastReceivedTime > 120000) {
           console.warn('Streaming stalled, force breaking.');
-          reader.cancel();
+          currentController?.abort();
         }
       }, 5000);
 
-      while (true) {
-        try {
-          const { done, value } = await reader.read();
-          if (done) {
-            isApiDoneRef.current = true;
-            break;
-          }
-          
+      try {
+        for await (const chunk of stream) {
           if (!timerStarted) {
             startTimers();
           }
-          
           lastReceivedTime = Date.now();
-          turnBuffer += decoder.decode(value, { stream: true });
-          const lines = turnBuffer.split('\n');
-          turnBuffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (trimmedLine.startsWith('data: ') && trimmedLine !== 'data: [DONE]') {
-              try {
-                const data = JSON.parse(trimmedLine.slice(6));
-                if (data.choices?.[0]?.delta?.content) {
-                  const content = data.choices[0].delta.content;
-                  fullTextRef.current += content;
-                }
-              } catch (e) {}
-            }
+          if (chunk.text) {
+            fullTextRef.current += chunk.text;
           }
-        } catch (e: any) {
-          if (e.name === 'AbortError') break;
-          throw e;
         }
+      } catch (e: any) {
+        if (e.name !== 'AbortError') throw e;
       }
-      
+
       isApiDoneRef.current = true;
       clearInterval(heartbeatInterval);
       
@@ -2509,6 +2432,44 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
             {/* Text Content */}
             <div className="flex-1 min-h-[300px] relative">
+              {generationPerformance && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`mb-4 p-4 rounded-2xl border flex flex-col gap-2 ${
+                    generationPerformance.type === 'success' ? 'bg-green-50 border-green-100 text-green-700' :
+                    generationPerformance.type === 'warning' ? 'bg-yellow-50 border-yellow-100 text-yellow-700' :
+                    generationPerformance.type === 'error' ? 'bg-red-50 border-red-100 text-red-700' :
+                    'bg-blue-50 border-blue-100 text-blue-700'
+                  }`}
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+                      <Activity size={14} /> Báo cáo hiệu suất API
+                    </span>
+                    <button onClick={() => setGenerationPerformance(null)} className="p-1 hover:bg-black/5 rounded-full">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <p className="text-sm font-medium">{generationPerformance.message}</p>
+                  <div className="w-full bg-black/5 h-2 rounded-full overflow-hidden relative">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.min(100, generationPerformance.percentage)}%` }}
+                      className={`absolute top-0 bottom-0 left-0 ${
+                        generationPerformance.type === 'success' ? 'bg-green-500' :
+                        generationPerformance.type === 'warning' ? 'bg-yellow-500' :
+                        generationPerformance.type === 'error' ? 'bg-red-500' :
+                        'bg-blue-500'
+                      }`}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] font-bold opacity-70">
+                    <span>Tiến độ: {Math.round(generationPerformance.percentage)}%</span>
+                    <span>{generationPerformance.charCount.toLocaleString()} / {generationPerformance.targetCount.toLocaleString()} ký tự</span>
+                  </div>
+                </motion.div>
+              )}
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xs text-stone-400">
                   Số ký tự: {((isEditing ? localContent : (currentChapter?.content || '')) + streamingContent).length.toLocaleString()} | Số Token (ước tính): {Math.floor(((isEditing ? localContent : (currentChapter?.content || '')) + streamingContent).length / 4).toLocaleString()} / {apiSettings.isUnlimited ? '∞' : apiSettings.maxTokens.toLocaleString()}
@@ -2781,6 +2742,15 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             </button>
             <h3 className="text-xl font-serif font-bold text-[#F9C6D4] mb-4">Chọn hướng phát triển tiếp theo</h3>
             <div className="space-y-3">
+              <button 
+                onClick={() => handleDirectionSelection("Tiếp tục triển khai mạch truyện hiện tại một cách sáng tạo và chi tiết nhất có thể.")}
+                className="w-full bg-[#D18E9B] text-white border border-[#D18E9B] py-4 px-4 rounded-xl font-bold hover:bg-[#B1717E] text-center transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <Sparkles size={20} /> Tiếp tục viết tiếp (Hệ thống tự triển khai)
+              </button>
+              
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center py-1">Hoặc chọn hướng cụ thể</div>
+
               {(suggestedDirections && suggestedDirections.length > 0 ? suggestedDirections : [
                 "Phát triển theo hướng lãng mạn",
                 "Thêm một tình tiết kịch tính bất ngờ",
@@ -3694,13 +3664,28 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
 
                 <div className={`space-y-6 ${activeSettingsTab === 'api' ? 'block' : 'hidden'}`}>
                   <div className="scrapbook-card">
+                    <label className="scrapbook-title">Loại API (API Type)</label>
+                    <select 
+                      value={apiSettings.apiType || 'auto'}
+                      onChange={(e) => setApiSettings({ ...apiSettings, apiType: e.target.value as any })}
+                      className="w-full scrapbook-input"
+                    >
+                      <option value="auto">Tự động phát hiện (Auto Detect)</option>
+                      <option value="openai">OpenAI-compatible</option>
+                      <option value="claude">Claude (Anthropic)</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="custom">Custom Endpoint</option>
+                    </select>
+                  </div>
+
+                  <div className="scrapbook-card">
                       <label className="scrapbook-title">API Key (Proxy/Direct)</label>
                       <DebouncedInput 
                         type="password"
                         value={apiSettings.apiKey}
                         onChange={(val: string) => setApiSettings({ ...apiSettings, apiKey: val })}
                         className="w-full scrapbook-input"
-                        placeholder="sk-..."
+                        placeholder="Nhập API Key..."
                       />
                     </div>
 
@@ -3715,13 +3700,24 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                     </div>
 
                     <div className="scrapbook-card">
-                      <label className="scrapbook-title">Số lượng ký tự mong muốn</label>
+                      <label className="scrapbook-title">Mục tiêu Token (Target Tokens)</label>
+                      <div className="grid grid-cols-4 gap-2 mb-4">
+                        {[12000, 20000, 25000, 30000, 40000, 50000, 70000, 80000].map(val => (
+                          <button 
+                            key={val}
+                            onClick={() => setApiSettings({ ...apiSettings, nextCharCount: val, maxTokens: val + 5000 })}
+                            className={`p-2 rounded-lg border text-[10px] font-bold transition-all ${apiSettings.nextCharCount === val ? 'bg-[#D18E9B] text-white border-[#D18E9B]' : 'bg-white text-[#777777] border-[#EACFD5]'}`}
+                          >
+                            {val.toLocaleString()}
+                          </button>
+                        ))}
+                      </div>
                       <DebouncedInput 
                         type="number"
                         value={apiSettings.nextCharCount || ''}
                         onChange={(val: string) => setApiSettings({ ...apiSettings, nextCharCount: parseInt(val) || undefined })}
                         className="w-full scrapbook-input"
-                        placeholder="Ví dụ: 1000"
+                        placeholder="Ví dụ: 12000"
                       />
                     </div>
 
@@ -3879,13 +3875,28 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
                       {secondaryApiSettings.enabled && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                           <div className="space-y-2">
+                            <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">Loại API (Phụ)</label>
+                            <select 
+                              value={secondaryApiSettings.apiType || 'auto'}
+                              onChange={(e) => setSecondaryApiSettings({ ...secondaryApiSettings, apiType: e.target.value as any })}
+                              className="w-full scrapbook-input text-sm"
+                            >
+                              <option value="auto">Tự động phát hiện</option>
+                              <option value="openai">OpenAI-compatible</option>
+                              <option value="claude">Claude (Anthropic)</option>
+                              <option value="gemini">Gemini</option>
+                              <option value="custom">Custom Endpoint</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-2">
                             <label className="text-xs font-bold text-[#5C4A4A] uppercase tracking-wider">API Key (Phụ)</label>
                             <DebouncedInput 
                               type="password"
                               value={secondaryApiSettings.apiKey}
                               onChange={(val: string) => setSecondaryApiSettings({ ...secondaryApiSettings, apiKey: val })}
                               className="w-full scrapbook-input text-sm"
-                              placeholder="sk-..."
+                              placeholder="Nhập API Key..."
                             />
                           </div>
 
@@ -4690,32 +4701,10 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             className="fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-[600] p-6 overflow-y-auto"
-            style={currentStory?.drawerBackground ? { backgroundImage: `url(${currentStory.drawerBackground})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' } : {}}
           >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold">Danh sách chương</h2>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                          const imageUrl = reader.result as string;
-                          updateStory({ drawerBackground: imageUrl });
-                        };
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                  <ImageIcon size={20} className="text-stone-400 hover:text-pink-500 cursor-pointer" />
-                </div>
-                <button onClick={() => setShowChapterDrawer(false)}><X /></button>
-              </div>
+              <button onClick={() => setShowChapterDrawer(false)}><X /></button>
             </div>
             <div className="space-y-2">
               {currentStory?.chapters?.map((chapter, index) => (
@@ -5388,7 +5377,7 @@ export default function KikokoNovelScreen({ onBack }: { onBack: () => void }) {
       <AnimatePresence>
         {showNPCNovelWriting && (
           <KikokoNPCNovelWriting 
-            onClose={handleCloseNPCNovelWriting}
+            onClose={() => setShowNPCNovelWriting(false)}
             apiSettings={apiSettings}
             secondaryApiSettings={secondaryApiSettings}
             currentStory={currentStory}

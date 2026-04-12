@@ -577,7 +577,8 @@ QUY TẮC BẮT BUỘC:
 8. BỘ NHỚ DÀI HẠN (Cốt truyện & Bối cảnh): ${currentNovel.longTermMemory || 'Chưa có dữ liệu'}
 9. BỘ NHỚ NHÂN VẬT (Thông tin các nhân vật phụ/chính/NPC): ${currentNovel.characterMemory || 'Chưa có dữ liệu'}
 10. PHONG CÁCH VIẾT: ${writingStylePrompt || 'Tự nhiên, lôi cuốn'}
-11. QUY TẮC TRÌNH BÀY: Mỗi dòng văn bản (line) PHẢI có độ dài từ 10 đến 14 chữ/từ trước khi xuống dòng. Hãy ngắt dòng một cách thủ công (manual line breaks) để đảm bảo mỗi dòng đều có độ dài này. Đây là yêu cầu BẮT BUỘC về định dạng.`;
+11. QUY TẮC TRÌNH BÀY: Mỗi dòng văn bản (line) PHẢI có độ dài từ 10 đến 14 chữ/từ trước khi xuống dòng. Hãy ngắt dòng một cách thủ công (manual line breaks) để đảm bảo mỗi dòng đều có độ dài này. Đây là yêu cầu BẮT BUỘC về định dạng.
+12. CẤM SỬ DỤNG KÝ TỰ ĐẶC BIỆT CHO THUẬT NGỮ: Tuyệt đối KHÔNG được để các thuật ngữ, tên riêng, hoặc từ ngữ nhấn mạnh trong dấu ngoặc đơn () hoặc dấu sao *. Hãy viết chúng như những từ ngữ bình thường trong văn bản tiểu thuyết. Ví dụ: viết "shoji" thay vì "*shoji*" hay "(shoji)".`;
 
       // Tính toán số lượng token mục tiêu dựa trên thời gian (5 phút = 12000 token => 1 phút = 2400 token)
       const targetTokens = userTimeoutMinutes * 2400;
@@ -1133,12 +1134,26 @@ Hãy cho các NPC "lắm chuyện" bắt đầu bàn tán! (Đợt ${i / batchSi
                     </h2>
                     <div className="space-y-6">
                       <div>
+                        <label className="block text-xs font-semibold text-stone-500 uppercase mb-1 ml-1">Loại API (API Type)</label>
+                        <select 
+                          value={currentNovel?.settings?.apiType || 'auto'}
+                          onChange={(e) => updateSettings({ apiType: e.target.value as any })}
+                          className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none transition-all"
+                        >
+                          <option value="auto">Tự động phát hiện (Auto Detect)</option>
+                          <option value="openai">OpenAI-compatible</option>
+                          <option value="claude">Claude (Anthropic)</option>
+                          <option value="gemini">Gemini</option>
+                          <option value="custom">Custom Endpoint</option>
+                        </select>
+                      </div>
+                      <div>
                         <label className="block text-xs font-semibold text-stone-500 uppercase mb-1 ml-1">API Endpoint</label>
                         <input type="text" placeholder="https://api.example.com/v1" value={currentNovel?.settings?.proxyEndpoint || ''} onChange={(e) => updateSettings({ proxyEndpoint: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none transition-all" />
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-stone-500 uppercase mb-1 ml-1">API Key</label>
-                        <input type="password" placeholder="sk-..." value={currentNovel?.settings?.proxyKey || ''} onChange={(e) => updateSettings({ proxyKey: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none transition-all" />
+                        <input type="password" placeholder="Nhập API Key (sk-..., yL9Fw..., v.v.)" value={currentNovel?.settings?.proxyKey || ''} onChange={(e) => updateSettings({ proxyKey: e.target.value })} className="w-full p-3 bg-white rounded-xl border border-[#FBCFE8] focus:ring-2 focus:ring-[#DB2777] outline-none transition-all" />
                       </div>
                       <div className="space-y-4">
                         <div className="flex justify-between items-center">

@@ -30,6 +30,7 @@ export interface Novel {
     proxyEndpoint: string;
     proxyKey: string;
     model: string;
+    apiType?: 'auto' | 'openai' | 'claude' | 'gemini' | 'custom';
     isSetupComplete: boolean;
     useStreaming?: boolean;
     extremeCapacityMode?: boolean;

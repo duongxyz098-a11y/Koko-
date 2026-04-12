@@ -4,6 +4,7 @@ import { ChevronLeft, Heart, Star, Coffee, MessageCircle, User, Settings, Image 
 import { generateNPCs, generateLoveQuiz, generateCafeScenarios, generateNPCResponse, NPCProfile, QuizQuestion, CafeScenario, UserProfile } from '../services/geminiService';
 import { sendCoreMessage } from '../services/coreAi';
 import { saveToDB, getFromDB } from '../utils/indexedDB';
+import { getLargeData, setLargeData } from '../utils/storage';
 import { compressImage } from '../utils/imageUtils';
 import { fetchAvailableModels, ApiProxySettings } from '../utils/apiProxy';
 
@@ -28,15 +29,42 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   }, []);
   
   // Game State
-  const [npcs, setNpcs] = useState<NPCProfile[]>(() => {
-    try {
-      const saved = localStorage.getItem('loveshow_npcs');
-      const parsed = saved ? JSON.parse(saved) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      return [];
-    }
-  });
+  const [npcs, setNpcs] = useState<NPCProfile[]>([]);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+  useEffect(() => {
+    const loadData = async () => {
+      const savedNpcs = await getLargeData('loveshow_npcs');
+      if (savedNpcs) {
+        setNpcs(savedNpcs);
+      } else {
+        try {
+          const saved = localStorage.getItem('loveshow_npcs');
+          const parsed = saved ? JSON.parse(saved) : [];
+          setNpcs(Array.isArray(parsed) ? parsed : []);
+          if (saved) localStorage.removeItem('loveshow_npcs');
+        } catch (e) {
+          setNpcs([]);
+        }
+      }
+
+      const savedProfile = await getLargeData('loveshow_profile');
+      if (savedProfile) {
+        setFormData(savedProfile);
+      } else {
+        const localProfile = localStorage.getItem('loveshow_profile');
+        if (localProfile) {
+          try {
+            setFormData(JSON.parse(localProfile));
+            localStorage.removeItem('loveshow_profile');
+          } catch (e) {}
+        }
+      }
+      setIsDataLoaded(true);
+    };
+    loadData();
+  }, []);
+
   const [loadingNpcs, setLoadingNpcs] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
@@ -99,34 +127,30 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
   }, [settings]);
   
   // Application Data
-  const [formData, setFormData] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('loveshow_profile');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return {
-      name: '',
-      intro: '',
-      target: '',
-      reason: '',
-      mc: 'MC Sâu Bọ',
-      gender: 'female',
-      targetGender: 'male',
-      minChars: 2000,
-      maxChars: 4000,
-      avatarBg: '#FFFFFF',
-      quizCount: 10,
-      cafeCount: 10,
-      npcCount: 40
-    };
+  const [formData, setFormData] = useState<UserProfile>({
+    name: '',
+    intro: '',
+    target: '',
+    reason: '',
+    mc: 'MC Sâu Bọ',
+    gender: 'female',
+    targetGender: 'male',
+    minChars: 2000,
+    maxChars: 4000,
+    avatarBg: '#FFFFFF',
+    quizCount: 10,
+    cafeCount: 10,
+    npcCount: 40
   });
 
   useEffect(() => {
-    localStorage.setItem('loveshow_npcs', JSON.stringify(npcs));
-  }, [npcs]);
+    if (isDataLoaded) {
+      setLargeData('loveshow_npcs', npcs);
+    }
+  }, [npcs, isDataLoaded]);
 
   const handleSaveProfile = () => {
-    localStorage.setItem('loveshow_profile', JSON.stringify(formData));
+    setLargeData('loveshow_profile', formData);
     alert('Đã lưu hồ sơ thành công! Các NPC đã đọc được hồ sơ của bạn. Hãy chuyển sang Sàn Diễn để bắt đầu.');
   };
 
@@ -268,6 +292,20 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
             <h2 className="text-xl font-bold mb-4">Cài đặt API Proxy</h2>
             <div className="space-y-4">
               <div>
+                <label className="block text-sm font-bold mb-1">Loại API</label>
+                <select 
+                  value={settings.apiType || 'auto'}
+                  onChange={e => setSettings(s => ({...s, apiType: e.target.value as any}))}
+                  className="w-full p-2 border rounded-lg text-xs"
+                >
+                  <option value="auto">Tự động phát hiện</option>
+                  <option value="openai">OpenAI-compatible</option>
+                  <option value="claude">Claude (Anthropic)</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="custom">Custom Endpoint</option>
+                </select>
+              </div>
+              <div>
                 <label className="block text-sm font-bold mb-1">API Endpoint</label>
                 <input 
                   type="text" 
@@ -284,7 +322,7 @@ export default function LoveShowScreen({ onBack }: { onBack: () => void }) {
                   value={settings.apiKey} 
                   onChange={e => setSettings(s => ({...s, apiKey: e.target.value}))} 
                   className="w-full p-2 border rounded-lg text-xs"
-                  placeholder="sk-..."
+                  placeholder="Nhập API Key..."
                 />
               </div>
               <div>

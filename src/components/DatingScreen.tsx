@@ -71,6 +71,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
   const [userApiKey, setUserApiKey] = useState('');
   const [userApiUrl, setUserApiUrl] = useState('');
   const [userModelName, setUserModelName] = useState('');
+  const [userApiType, setUserApiType] = useState<'auto' | 'openai' | 'claude' | 'gemini' | 'custom'>('auto');
   const [userIsUnlimited, setUserIsUnlimited] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showApiSettings, setShowApiSettings] = useState(false);
@@ -202,6 +203,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         setUserApiKey(savedSettings.apiKey || '');
         setUserApiUrl(savedSettings.endpoint || '');
         setUserModelName(savedSettings.model || '');
+        setUserApiType(savedSettings.apiType || 'auto');
         setUserIsUnlimited(savedSettings.isUnlimited || false);
       }
       setIsLoaded(true);
@@ -228,6 +230,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           apiKey: userApiKey, 
           endpoint: userApiUrl, 
           model: userModelName,
+          apiType: userApiType,
           isUnlimited: userIsUnlimited
         });
         console.log('DatingScreen: Data saved to IndexedDB');
@@ -241,7 +244,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [profiles, currentProfileId, userApiKey, userApiUrl, userModelName, userIsUnlimited, npcUploadedImages, isLoaded]);
+  }, [profiles, currentProfileId, userApiKey, userApiUrl, userModelName, userApiType, userIsUnlimited, npcUploadedImages, isLoaded]);
 
   const currentProfile = profiles.find(p => p.id === currentProfileId) || profiles[0] || {
     id: 'default',
@@ -565,7 +568,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           avatarBg: avatarBg,
           chatMode: chatMode
         },
-        { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName, isUnlimited: userIsUnlimited }
+        { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName, apiType: userApiType, isUnlimited: userIsUnlimited }
       );
       
       const responseContent = response.content;
@@ -659,7 +662,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
           avatarBg: avatarBg,
           chatMode: chatMode
         },
-        { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName }
+        { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName, apiType: userApiType }
       );
       
       const responseContent = response.content;
@@ -742,6 +745,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
             endpoint: userApiUrl,
             apiKey: userApiKey,
             model: userModelName,
+            apiType: userApiType,
             systemPrompt: "Bạn là một chuyên gia tạo bài đăng cho ứng dụng hẹn hò.",
             maxTokens: 100000,
             isUnlimited: userIsUnlimited
@@ -890,6 +894,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         endpoint: userApiUrl,
         apiKey: userApiKey,
         model: userModelName,
+        apiType: userApiType,
         systemPrompt: "Bạn là một hệ thống tạo bình luận tự động cho mạng xã hội hẹn hò.",
         maxTokens: 50000,
         isUnlimited: userIsUnlimited
@@ -1027,6 +1032,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         endpoint: userApiUrl,
         apiKey: userApiKey,
         model: userModelName,
+        apiType: userApiType,
         systemPrompt: "Bạn là một hệ thống tạo bình luận từ NPC cho bài đăng của người dùng.",
         maxTokens: 50000,
         isUnlimited: userIsUnlimited
@@ -1097,6 +1103,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
         endpoint: userApiUrl,
         apiKey: userApiKey,
         model: userModelName,
+        apiType: userApiType,
         systemPrompt: `Bạn là ${npcName}, đang đăng 10 bài trên ứng dụng hẹn hò Sách Thế Giới.`,
         maxTokens: 20000,
         isUnlimited: userIsUnlimited
@@ -1466,7 +1473,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
             avatarBg: avatarBg,
             chatMode: chatMode
           },
-          { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName }
+          { apiKey: userApiKey, endpoint: userApiUrl, model: userModelName, apiType: userApiType }
         );
         
         const greetingContent = greeting.content;
@@ -2042,6 +2049,21 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                 </div>
 
                 <div>
+                  <label className="text-xs font-bold text-[#8c8286] uppercase tracking-wider block mb-1.5 ml-1">Loại API (API Type)</label>
+                  <select 
+                    value={userApiType}
+                    onChange={e => setUserApiType(e.target.value as any)}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-[#F3B4C2] transition-colors"
+                  >
+                    <option value="auto">Tự động phát hiện (Auto Detect)</option>
+                    <option value="openai">OpenAI-compatible</option>
+                    <option value="claude">Claude (Anthropic)</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="custom">Custom Endpoint</option>
+                  </select>
+                </div>
+
+                <div>
                   <label className="text-xs font-bold text-[#8c8286] uppercase tracking-wider block mb-1.5 ml-1">API URL (Proxy)</label>
                   <input 
                     type="text" 
@@ -2058,7 +2080,7 @@ export default function DatingScreen({ onBack }: { onBack: () => void }) {
                     type="password" 
                     value={userApiKey}
                     onChange={e => setUserApiKey(e.target.value)}
-                    placeholder="sk-..."
+                    placeholder="Nhập API Key (sk-..., yL9Fw..., v.v.)"
                     className="w-full bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-[#F3B4C2] transition-colors"
                   />
                 </div>

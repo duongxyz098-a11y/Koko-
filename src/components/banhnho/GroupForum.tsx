@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, ChevronDown, ChevronUp, Heart, MessageCircle, Share2, ArrowLeft, Image as ImageIcon, Send, User, Check, Settings, Grid, Bookmark, MoreHorizontal, MoreVertical, Edit2, Trash2, Megaphone } from 'lucide-react';
 import { sendMessageStream, ApiProxySettings } from '../../utils/apiProxy';
+import { saveForumData, loadForumData } from '../../utils/db';
 
 interface GroupForumProps {
   apiSettings: ApiProxySettings;
@@ -21,6 +22,14 @@ interface GroupForumProps {
   onNavigateToTab?: (tabId: string) => void;
 }
 
+interface PostBatch {
+  id: string;
+  name: string; // e.g., "Đợt 1"
+  timestamp: string;
+  posts: any[];
+  background?: string;
+}
+
 interface GroupData {
   id: string;
   name: string;
@@ -37,18 +46,92 @@ interface GroupData {
   bannerImage?: string;
   illustrationImage?: string;
   secondaryImage?: string;
+  batches?: PostBatch[];
 }
 
 const npcAvatars = [
-  'https://i.postimg.cc/c42kC0xR/c09747925c2edff031be41ff2991e391.jpg',
-  'https://i.postimg.cc/fbhH7C0f/7d2ec7e0d85397440591615a0ac87674-(1).jpg',
-  'https://i.postimg.cc/fL8BNhqC/b69db821aa450ec6a448bbfe428140d7.jpg',
-  'https://i.postimg.cc/2yJG17DL/8536bf0d794b0d2eb0ad9641cc223620.jpg',
-  'https://i.postimg.cc/J4DK9vNk/f2fa9f0508bd2415954bc56bb3c62127.jpg',
-  'https://i.postimg.cc/bw1gvnFZ/27f8680be6af0f668a2309f3abdc8fe2.jpg',
-  'https://i.postimg.cc/7hCMrJ2x/ffce4db043116fcf61b000fe93aac19e.jpg',
-  'https://i.postimg.cc/htR8NjPR/0b4c33da63aae2acaa05d3eb41f4678d.jpg',
-  'https://i.postimg.cc/yNvFJyhN/ca5e8f11f10a49feeb32910734438439.jpg'
+  'https://i.postimg.cc/K8YsjygV/8bf48946a8a6c1c7808055ae66638ecf.jpg',
+  'https://i.postimg.cc/3NBnrLrY/7ceb610e6bcaa5ab56455bebd21c2ab2.jpg',
+  'https://i.postimg.cc/85gHR8jG/31852e119a56c6c911b88e16288aa325.jpg',
+  'https://i.postimg.cc/sgB9bfW7/987727d1717650d6e85c26a4842b8cd7.jpg',
+  'https://i.postimg.cc/FzK3Ff5x/8ba1f29b574ce1427d5bea5da098b759.jpg',
+  'https://i.postimg.cc/pdf8tmLd/5b6ae6d1fd5c96e463ca6aa1036bbc88.jpg',
+  'https://i.postimg.cc/vTNxv932/dbbbd8f7f0ac3352569ea193d49b992f.jpg',
+  'https://i.postimg.cc/j5qW0v1N/8e0f80bf499843f17a6d72cb04d43463.jpg',
+  'https://picsum.photos/seed/avatar1/200',
+  'https://picsum.photos/seed/avatar2/200',
+  'https://picsum.photos/seed/avatar3/200',
+  'https://picsum.photos/seed/avatar4/200',
+  'https://picsum.photos/seed/avatar5/200',
+  'https://picsum.photos/seed/avatar6/200',
+  'https://picsum.photos/seed/avatar7/200',
+  'https://picsum.photos/seed/avatar8/200',
+  'https://picsum.photos/seed/avatar9/200',
+  'https://picsum.photos/seed/avatar10/200',
+  'https://picsum.photos/seed/avatar11/200',
+  'https://picsum.photos/seed/avatar12/200',
+  'https://picsum.photos/seed/avatar13/200',
+  'https://picsum.photos/seed/avatar14/200',
+  'https://picsum.photos/seed/avatar15/200',
+  'https://picsum.photos/seed/avatar16/200',
+  'https://picsum.photos/seed/avatar17/200',
+  'https://picsum.photos/seed/avatar18/200',
+  'https://picsum.photos/seed/avatar19/200',
+  'https://picsum.photos/seed/avatar20/200',
+];
+
+function cleanRaw(text: string) {
+  return text
+    .replace(/^data:\s*/gm, "")
+    .replace(/```json|```/g, "")
+    .trim();
+}
+
+function extractByRegex(text: string) {
+  const regex = /{\s*"author"\s*:\s*"([^"]+)"\s*,\s*"content"\s*:\s*"([\s\S]*?)"\s*}/g;
+  const results: any[] = [];
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    results.push({
+      author: match[1],
+      content: match[2]
+    });
+  }
+
+  return results;
+}
+
+function safeParse(text: string) {
+  const cleaned = cleanRaw(text);
+  try {
+    const parsed = JSON.parse(cleaned);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return extractByRegex(cleaned);
+  }
+}
+
+const validatePosts = (parsed: any[]) => {
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(p =>
+    p && p.author && p.content && p.content.length > 50
+  );
+};
+
+const robustParseJSON = (text: string) => {
+  return safeParse(text);
+};
+
+const postImages = [
+  'https://i.postimg.cc/K8YsjygV/8bf48946a8a6c1c7808055ae66638ecf.jpg',
+  'https://i.postimg.cc/3NBnrLrY/7ceb610e6bcaa5ab56455bebd21c2ab2.jpg',
+  'https://i.postimg.cc/85gHR8jG/31852e119a56c6c911b88e16288aa325.jpg',
+  'https://i.postimg.cc/sgB9bfW7/987727d1717650d6e85c26a4842b8cd7.jpg',
+  'https://i.postimg.cc/FzK3Ff5x/8ba1f29b574ce1427d5bea5da098b759.jpg',
+  'https://i.postimg.cc/pdf8tmLd/5b6ae6d1fd5c96e463ca6aa1036bbc88.jpg',
+  'https://i.postimg.cc/vTNxv932/dbbbd8f7f0ac3352569ea193d49b992f.jpg',
+  'https://i.postimg.cc/j5qW0v1N/8e0f80bf499843f17a6d72cb04d43463.jpg'
 ];
 
 const ImageWithFilter = ({ src, className, alt = "" }: { src: string, className?: string, alt?: string }) => (
@@ -76,41 +159,149 @@ export default function GroupForum({
   showToast,
   onNavigateToTab 
 }: GroupForumProps) {
-  const [view, setView] = useState<'intro' | 'create' | 'list' | 'group_intro' | 'group_detail' | 'npc_profile' | 'promote' | 'api_settings'>(() => {
+  const [view, setView] = useState<'intro' | 'create' | 'list' | 'group_intro' | 'group_detail' | 'npc_profile' | 'promote' | 'api_settings' | 'flower_creation'>(() => {
     return localStorage.getItem('banhnho_has_seen_intro') === 'true' ? 'list' : 'intro';
   });
   const [streamingText, setStreamingText] = useState('');
-  const [groups, setGroups] = useState<GroupData[]>(() => {
-    try {
-      const saved = localStorage.getItem('banhnho_groups');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
-  });
+  const [groups, setGroups] = useState<GroupData[]>([]);
   const [currentGroup, setCurrentGroup] = useState<GroupData | null>(null);
   const [selectedNPC, setSelectedNPC] = useState<{name: string, avatar: string} | null>(null);
   const [npcProfilePosts, setNpcProfilePosts] = useState<any[]>([]);
-  const [likedComments, setLikedComments] = useState<Set<string>>(new Set());
-  const [showPromoteModal, setShowPromoteModal] = useState(false);
-  const [promoteImage, setPromoteImage] = useState<string | null>(null);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [newPostContent, setNewPostContent] = useState('');
   const [promoteContent, setPromoteContent] = useState('');
-  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [groupToDelete, setGroupToDelete] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('banhnho_groups', JSON.stringify(groups));
-    } catch (e) {
-      console.warn("Failed to save groups to localStorage", e);
-    }
-  }, [groups]);
+  const [groupBatches, setGroupBatches] = useState<PostBatch[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [creationBackground, setCreationBackground] = useState<string>('https://i.postimg.cc/K8YsjygV/8bf48946a8a6c1c7808055ae66638ecf.jpg');
+  const [promoteHistory, setPromoteHistory] = useState<any[]>([]);
   
   // Create Form State
   const [openAccordion, setOpenAccordion] = useState<number | null>(1);
   const [formData, setFormData] = useState<Partial<GroupData>>({
     themeColor: '#FFC8D2'
   });
+
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        const savedGroups = await loadForumData('banhnho_groups');
+        if (savedGroups) setGroups(savedGroups);
+        else {
+          const localGroups = localStorage.getItem('banhnho_groups');
+          if (localGroups) {
+            setGroups(JSON.parse(localGroups));
+            localStorage.removeItem('banhnho_groups');
+          }
+        }
+
+        const savedFormData = await loadForumData('banhnho_form_data');
+        if (savedFormData) setFormData(savedFormData);
+        else {
+          const localFormData = localStorage.getItem('banhnho_form_data');
+          if (localFormData) {
+            setFormData(JSON.parse(localFormData));
+            localStorage.removeItem('banhnho_form_data');
+          }
+        }
+
+        const savedNewPost = await loadForumData('banhnho_new_post_content');
+        if (savedNewPost) setNewPostContent(savedNewPost);
+        else {
+          const localNewPost = localStorage.getItem('banhnho_new_post_content');
+          if (localNewPost) {
+            setNewPostContent(localNewPost);
+            localStorage.removeItem('banhnho_new_post_content');
+          }
+        }
+
+        const savedPromoteContent = await loadForumData('banhnho_promote_content');
+        if (savedPromoteContent) setPromoteContent(savedPromoteContent);
+        else {
+          const localPromoteContent = localStorage.getItem('banhnho_promote_content');
+          if (localPromoteContent) {
+            setPromoteContent(localPromoteContent);
+            localStorage.removeItem('banhnho_promote_content');
+          }
+        }
+
+        setIsDataLoaded(true);
+      } catch (e) {
+        console.error("Failed to load forum data", e);
+        setIsDataLoaded(true);
+      }
+    };
+    loadInitialData();
+  }, []);
+
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    saveForumData('banhnho_groups', groups);
+  }, [groups, isDataLoaded]);
+
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    saveForumData('banhnho_new_post_content', newPostContent);
+  }, [newPostContent, isDataLoaded]);
+
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    saveForumData('banhnho_promote_content', promoteContent);
+  }, [promoteContent, isDataLoaded]);
+
+  // Load NPC profile posts when selectedNPC changes
+  useEffect(() => {
+    if (selectedNPC?.name) {
+      const loadNpcPosts = async () => {
+        try {
+          const savedPosts = await loadForumData(`banhnho_npc_posts_${selectedNPC.name}`);
+          if (savedPosts) {
+            setNpcProfilePosts(savedPosts);
+          } else {
+            const localPosts = localStorage.getItem(`banhnho_npc_posts_${selectedNPC.name}`);
+            if (localPosts) {
+              setNpcProfilePosts(JSON.parse(localPosts));
+              localStorage.removeItem(`banhnho_npc_posts_${selectedNPC.name}`);
+            } else {
+              setNpcProfilePosts([]);
+            }
+          }
+        } catch (e) {
+          setNpcProfilePosts([]);
+        }
+      };
+      loadNpcPosts();
+    } else {
+      setNpcProfilePosts([]);
+    }
+  }, [selectedNPC?.name]);
+
+  // Save NPC profile posts when they change
+  useEffect(() => {
+    if (selectedNPC?.name && npcProfilePosts.length > 0 && isDataLoaded) {
+      try {
+        saveForumData(`banhnho_npc_posts_${selectedNPC.name}`, npcProfilePosts);
+      } catch (e) {
+        console.warn("Failed to save NPC posts to IndexedDB", e);
+      }
+    }
+  }, [npcProfilePosts, selectedNPC?.name, isDataLoaded]);
+  const [likedComments, setLikedComments] = useState<Set<string>>(new Set());
+  const [showPromoteModal, setShowPromoteModal] = useState(false);
+  const [promoteImage, setPromoteImage] = useState<string | null>(null);
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [groupToDelete, setGroupToDelete] = useState<string | null>(null);
+
+  // New states for Promote and Approve
+  const [promoteTab, setPromoteTab] = useState<'promote' | 'approve'>('promote');
+  const [promotePost, setPromotePost] = useState<any>(null);
+  const [approvedMembers, setApprovedMembers] = useState<any[]>([]);
+  const [isCreatingPromote, setIsCreatingPromote] = useState(false);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isDataLoaded) return;
+    saveForumData('banhnho_form_data', formData);
+  }, [formData, isDataLoaded]);
 
   // Loading State
   const [isLoading, setIsLoading] = useState(false);
@@ -401,66 +592,233 @@ export default function GroupForum({
     );
   };
 
+  // Load persistent data for current group
+  useEffect(() => {
+    if (currentGroup?.id) {
+      const loadGroupData = async () => {
+        try {
+          const savedBatches = await loadForumData(`banhnho_batches_${currentGroup.id}`);
+          if (savedBatches) {
+            setGroupBatches(savedBatches);
+            if (savedBatches.length > 0) {
+              setSelectedBatchId(savedBatches[0].id);
+            } else {
+              setSelectedBatchId(null);
+            }
+          } else {
+            setGroupBatches([]);
+            setSelectedBatchId(null);
+          }
+          
+          const savedPromote = await loadForumData(`banhnho_promote_${currentGroup.id}`);
+          if (savedPromote) setPromotePost(savedPromote);
+          else {
+            const localPromote = localStorage.getItem(`banhnho_promote_${currentGroup.id}`);
+            if (localPromote) {
+              setPromotePost(JSON.parse(localPromote));
+              localStorage.removeItem(`banhnho_promote_${currentGroup.id}`);
+            } else {
+              setPromotePost(null);
+            }
+          }
+          
+          const savedApproved = await loadForumData(`banhnho_approved_${currentGroup.id}`);
+          if (savedApproved) setApprovedMembers(savedApproved);
+          else {
+            const localApproved = localStorage.getItem(`banhnho_approved_${currentGroup.id}`);
+            if (localApproved) {
+              setApprovedMembers(JSON.parse(localApproved));
+              localStorage.removeItem(`banhnho_approved_${currentGroup.id}`);
+            } else {
+              setApprovedMembers([]);
+            }
+          }
+
+          const savedHistory = await loadForumData(`banhnho_promote_history_${currentGroup.id}`);
+          if (savedHistory) setPromoteHistory(savedHistory);
+          else {
+            const localHistory = localStorage.getItem(`banhnho_promote_history_${currentGroup.id}`);
+            if (localHistory) {
+              setPromoteHistory(JSON.parse(localHistory));
+              localStorage.removeItem(`banhnho_promote_history_${currentGroup.id}`);
+            } else {
+              setPromoteHistory([]);
+            }
+          }
+        } catch (e) {
+          setGroupBatches([]);
+          setPromotePost(null);
+          setApprovedMembers([]);
+          setPromoteHistory([]);
+        }
+      };
+      loadGroupData();
+    } else {
+      setGroupBatches([]);
+      setPromotePost(null);
+      setApprovedMembers([]);
+      setPromoteHistory([]);
+    }
+    setPromoteTab('promote');
+    setIsCreatingPromote(false);
+    setSelectedHistoryId(null);
+  }, [currentGroup?.id]);
+
+  // Save persistent data when it changes
+  useEffect(() => {
+    if (currentGroup?.id && isDataLoaded) {
+      try {
+        saveForumData(`banhnho_batches_${currentGroup.id}`, groupBatches);
+        saveForumData(`banhnho_promote_${currentGroup.id}`, promotePost);
+        saveForumData(`banhnho_approved_${currentGroup.id}`, approvedMembers);
+        saveForumData(`banhnho_promote_history_${currentGroup.id}`, promoteHistory);
+      } catch (e) {
+        console.warn("Failed to save data to IndexedDB", e);
+      }
+    }
+  }, [groupBatches, promotePost, approvedMembers, promoteHistory, currentGroup?.id, isDataLoaded]);
+
   const [groupPosts, setGroupPosts] = useState<any[]>([]);
+  
+  // Update groupPosts based on selected batch
+  useEffect(() => {
+    if (selectedBatchId) {
+      const batch = groupBatches.find(b => b.id === selectedBatchId);
+      if (batch) {
+        setGroupPosts(batch.posts);
+      } else {
+        setGroupPosts([]);
+      }
+    } else {
+      // If no batch selected, show all posts from all batches
+      const allPosts = groupBatches.flatMap(b => b.posts);
+      setGroupPosts(allPosts);
+    }
+  }, [selectedBatchId, groupBatches]);
+
+  const generateGroupPosts = async () => {
+    if (!currentGroup) return;
+    setIsLoading(true);
+    setLoadingMsg('Đang tạo 20 bài đăng diễn đàn...');
+    
+    try {
+      const prompt = `Trả về CHÍNH XÁC 20 bài viết dưới dạng JSON array cho nhóm "${currentGroup.name}".
+      Chủ đề: ${currentGroup.topic}. 
+      Quy tắc nhóm: ${currentGroup.rules}.
+      Quy tắc NPC: ${currentGroup.npcRules}.
+
+      Mỗi phần tử:
+      {
+        "author": "...",
+        "content": "..."
+      }
+
+      Yêu cầu:
+      - Nội dung mỗi bài tối thiểu 1200 ký tự
+      - Không markdown
+      - Không giải thích
+      - Không text ngoài JSON
+
+      Chỉ trả về JSON duy nhất:
+
+      [
+        {...},
+        {...}
+      ]
+
+      Nếu không đủ 20 bài → vẫn phải tạo đủ.
+
+      KHÔNG được:
+      - trả về code
+      - trả về text ngoài JSON
+      - trả về markdown`;
+
+      const stream = sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo nội dung diễn đàn chuyên nghiệp. CHỈ TRẢ VỀ JSON ARRAY HỢP LỆ.");
+      
+      let fullText = "";
+      for await (const chunk of stream) {
+        fullText += chunk.text;
+      }
+
+      const parsed = safeParse(fullText);
+      const validPosts = validatePosts(parsed);
+
+      if (validPosts.length > 0) {
+        const newPosts = validPosts.map((p: any, i: number) => {
+          return {
+            id: Date.now().toString() + '_' + i + '_' + Math.random().toString(36).substr(2, 9),
+            author: p.author || `Thành viên_${i}`,
+            avatar: npcAvatars[i % npcAvatars.length],
+            content: p.content,
+            image: Math.random() > 0.6 ? postImages[Math.floor(Math.random() * postImages.length)] : null,
+            likes: Math.floor(Math.random() * 200) + 50,
+            comments: []
+          };
+        });
+
+        const newBatch: PostBatch = {
+          id: Date.now().toString(),
+          name: `Đợt ${groupBatches.length + 1}`,
+          timestamp: new Date().toLocaleString('vi-VN'),
+          posts: newPosts,
+          background: creationBackground
+        };
+
+        setGroupBatches(prev => [newBatch, ...prev]);
+        setSelectedBatchId(newBatch.id);
+        showToast(`Đã tạo thành công đợt bài đăng mới với ${newPosts.length} bài!`);
+      } else {
+        showToast("Không thể tạo bài đăng. Vui lòng thử lại.");
+      }
+    } catch (error) {
+      console.error("Generation failed:", error);
+      showToast("Lỗi khi kết nối API. Vui lòng thử lại.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const generateNPCPrompt = async () => {
     setIsLoading(true);
-    setStreamingText('');
+    setLoadingMsg('Đang tạo bài đăng NPC...');
     
     try {
-      const prompt = `Hãy tạo 20 bài đăng cho nhóm "${currentGroup?.name}". 
+      const prompt = `Hãy tạo 10 bài đăng cho nhóm "${currentGroup?.name}". 
       Chủ đề: ${currentGroup?.topic}. 
       Quy tắc NPC: ${currentGroup?.npcRules}.
-      Yêu cầu: Mỗi bài viết phải dài khoảng 700 ký tự, thể hiện rõ tính cách của NPC như một bài chia sẻ tâm huyết.
+      Yêu cầu: Mỗi bài viết phải dài khoảng 1000 ký tự, thể hiện rõ tính cách của NPC như một bài chia sẻ tâm huyết.
       Trả về định dạng JSON array: [{"author": "Tên", "content": "Nội dung bài viết"}].
       KHÔNG GIẢI THÍCH, CHỈ TRẢ VỀ JSON.`;
 
-      const stream = await sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo nội dung NPC cho hội nhóm.");
+      const stream = sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo nội dung NPC cho hội nhóm. CHỈ TRẢ VỀ JSON ARRAY HỢP LỆ.");
       
-      if (!stream) throw new Error("No stream");
-
       let fullText = "";
-      
-      if (typeof (stream as any).getReader === 'function') {
-        const reader = (stream as ReadableStream).getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          fullText += chunk;
-          setStreamingText(prev => prev + chunk);
-        }
-      } else {
-        for await (const chunk of stream as any) {
-          const text = chunk.text || "";
-          fullText += text;
-          setStreamingText(prev => prev + text);
-        }
+      for await (const chunk of stream) {
+        fullText += chunk.text;
       }
 
-      // Try to parse JSON from fullText
-      try {
-        const match = fullText.match(/\[[\s\S]*\]/);
-        if (match) {
-          const parsed = JSON.parse(match[0]);
-          const newPosts = parsed.map((p: any, i: number) => ({
-            id: (Date.now() + i).toString(),
-            author: p.author || `NPC_${i}`,
-            avatar: npcAvatars[i % npcAvatars.length],
-            content: p.content,
-            image: `https://picsum.photos/seed/${Math.random()}/600/400`,
-            likes: Math.floor(Math.random() * 100),
-            comments: []
-          }));
-          setGroupPosts(prev => [...newPosts, ...prev]);
-        }
-      } catch (e) {
-        console.error("Failed to parse NPC posts JSON", e);
+      const parsed = safeParse(fullText);
+      const validPosts = validatePosts(parsed);
+
+      if (validPosts.length > 0) {
+        const newPosts = validPosts.map((p: any, i: number) => ({
+          id: (Date.now() + i).toString() + '_npc_' + Math.random().toString(36).substr(2, 5),
+          author: p.author || `NPC_${i}`,
+          avatar: npcAvatars[i % npcAvatars.length],
+          content: p.content,
+          image: Math.random() > 0.6 ? postImages[Math.floor(Math.random() * postImages.length)] : null,
+          likes: Math.floor(Math.random() * 150) + 20,
+          comments: []
+        }));
+        setGroupPosts(prev => [...newPosts, ...prev]);
+        showToast(`Đã tạo thêm ${newPosts.length} bài đăng NPC!`);
+      } else {
+        showToast("Không thể tạo bài đăng NPC. Vui lòng thử lại.");
       }
 
     } catch (error) {
       console.error(error);
+      showToast("Lỗi khi tạo bài đăng NPC.");
     } finally {
       setIsLoading(false);
     }
@@ -468,56 +826,40 @@ export default function GroupForum({
 
   const generateComments = async (postId: string) => {
     setIsLoading(true);
-    setStreamingText('');
+    setLoadingMsg('Đang tạo bình luận tương tác...');
     
     try {
-      const prompt = `Hãy tạo 300 bình luận tương tác cho bài viết trong nhóm "${currentGroup?.name}".
-      Các NPC phải tương tác qua lại, đúng chủ đề, không trùng lặp.
+      const prompt = `Hãy tạo 20 bình luận tương tác cho bài viết trong nhóm "${currentGroup?.name}".
+      Các NPC phải tương tác qua lại, đúng chủ đề, không trùng lặp, thể hiện rõ tính cách.
       Trả về JSON array: [{"author": "Tên", "content": "Nội dung"}]. CHỈ JSON.`;
 
-      const stream = await sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo bình luận NPC.");
+      const stream = sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo bình luận NPC chuyên nghiệp. CHỈ TRẢ VỀ JSON ARRAY HỢP LỆ.");
       
-      if (!stream) throw new Error("No stream");
-
       let fullText = "";
-      
-      if (typeof (stream as any).getReader === 'function') {
-        const reader = (stream as ReadableStream).getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          fullText += chunk;
-          setStreamingText(prev => prev + chunk);
-        }
-      } else {
-        for await (const chunk of stream as any) {
-          const text = chunk.text || "";
-          fullText += text;
-          setStreamingText(prev => prev + text);
-        }
+      for await (const chunk of stream) {
+        fullText += chunk.text;
       }
 
-      try {
-        const match = fullText.match(/\[[\s\S]*\]/);
-        if (match) {
-          const parsed = JSON.parse(match[0]);
-          const newComments = parsed.slice(0, 300).map((c: any, i: number) => ({
-            id: (Date.now() + i).toString(),
-            author: c.author || `NPC_${i}`,
-            avatar: npcAvatars[i % npcAvatars.length],
-            content: c.content
-          }));
-          
-          setGroupPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: newComments } : p));
-        }
-      } catch (e) {
-        console.error("Failed to parse comments JSON", e);
+      const parsed = safeParse(fullText);
+      const validComments = validatePosts(parsed);
+
+      if (validComments.length > 0) {
+        const newComments = validComments.map((c: any, i: number) => ({
+          id: (Date.now() + i).toString() + '_comment_' + Math.random().toString(36).substr(2, 5),
+          author: c.author || `NPC_${i}`,
+          avatar: npcAvatars[i % npcAvatars.length],
+          content: c.content
+        }));
+        
+        setGroupPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...newComments, ...p.comments] } : p));
+        showToast(`Đã tạo ${newComments.length} bình luận mới!`);
+      } else {
+        showToast("Không thể tạo bình luận. Vui lòng thử lại.");
       }
 
     } catch (error) {
       console.error(error);
+      showToast("Lỗi khi tạo bình luận.");
     } finally {
       setIsLoading(false);
     }
@@ -529,11 +871,11 @@ export default function GroupForum({
     // Optimistically mark as liked
     setLikedComments(prev => new Set(prev).add(comment.id));
     setIsLoading(true);
-    setStreamingText('');
+    setLoadingMsg('Đang tạo phản hồi từ NPC...');
     
     try {
       const prompt = `Người dùng vừa thả tim bài đăng của "${comment.author}". 
-      Hãy tạo ra 30 bình luận từ các NPC khác nhau tương tác với bài đăng này.
+      Hãy tạo ra 15 bình luận từ các NPC khác nhau tương tác với bài đăng này.
       Bài đăng: "${comment.content}"
       Chủ đề nhóm: ${currentGroup?.topic}.
       Yêu cầu:
@@ -542,64 +884,100 @@ export default function GroupForum({
       - Trả về định dạng JSON array: [{"author": "Tên NPC", "content": "Nội dung bình luận"}].
       KHÔNG GIẢI THÍCH, CHỈ TRẢ VỀ JSON.`;
 
-      const response = await fetch('/api/generate-content', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt, 
-          systemInstruction: "Bạn là hệ thống tạo bình luận NPC số lượng lớn.",
-          apiKey: apiSettings.apiKey,
-          model: apiSettings.model,
-          endpoint: apiSettings.endpoint,
-          maxTokens: apiSettings.maxTokens
-        })
-      });
-
-      if (!response.ok) throw new Error("Failed to generate comments");
+      const stream = sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo bình luận NPC chuyên nghiệp. CHỈ TRẢ VỀ JSON ARRAY HỢP LỆ.");
       
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
       let fullText = "";
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') break;
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.text) fullText += parsed.text;
-              } catch (e) {}
-            }
-          }
-        }
+      for await (const chunk of stream) {
+        fullText += chunk.text;
       }
 
-      try {
-        const match = fullText.match(/\[[\s\S]*?\]/);
-        if (match) {
-          const parsed = JSON.parse(match[0]);
-          
-          const massiveComments = [];
-          for (let i = 0; i < 300; i++) {
-            const baseComment = parsed[i % parsed.length];
-            massiveComments.push({
-              id: Date.now().toString() + '_' + i,
-              author: i < parsed.length ? baseComment?.author : `NPC_${Math.floor(Math.random() * 10000)}`,
-              avatar: npcAvatars[i % npcAvatars.length],
-              content: i < parsed.length ? baseComment?.content : `${baseComment?.content} ${['✨', '💖', '🌸', '🎀', '🥺', '🥰'][Math.floor(Math.random() * 6)]}`
-            });
-          }
-          
-          setGroupPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), ...massiveComments] } : p));
+      const parsed = safeParse(fullText);
+      const validComments = validatePosts(parsed);
+
+      if (validComments.length > 0) {
+        const massiveComments = [];
+        for (let i = 0; i < 30; i++) {
+          const baseComment = validComments[i % validComments.length];
+          massiveComments.push({
+            id: Date.now().toString() + '_like_' + i + '_' + Math.random().toString(36).substr(2, 5),
+            author: baseComment.author || `NPC_${Math.floor(Math.random() * 10000)}`,
+            avatar: npcAvatars[i % npcAvatars.length],
+            content: baseComment.content
+          });
         }
-      } catch (e) {
-        console.error("Failed to parse comments JSON", e);
+        
+        setGroupPosts(prev => prev.map(p => p.id === postId ? { 
+          ...p, 
+          likes: p.likes + 1,
+          comments: [...(p.comments || []), ...massiveComments]
+        } : p));
+        showToast(`Đã tạo ${massiveComments.length} bình luận tương tác!`);
+      } else {
+        showToast("Không thể tạo bình luận tương tác. Vui lòng thử lại.");
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleBunnyComment = async (postId: string, post: any) => {
+    setIsLoading(true);
+    setLoadingMsg('Đang gọi 500 NPC vào bình luận...');
+    setStreamingText('');
+    
+    try {
+      const prompt = `Hãy tạo ra 50 bình luận từ các NPC khác nhau tương tác với bài đăng này.
+      Bài đăng: "${post.content}"
+      Chủ đề nhóm: ${currentGroup?.topic}.
+      Yêu cầu ĐẶC BIỆT về tính cách NPC:
+      - Mỗi NPC phải có một cá tính riêng biệt: vui vẻ, nhí nhảnh, nghiêm túc, hời hợt, sâu sắc, hoặc tò mò.
+      - Thay vì chỉ nói "tớ xin vào nhóm", họ phải giải thích lý do thực sự muốn tham gia (ví dụ: vì đam mê chủ đề này, vì thấy nhóm dễ thương, vì muốn tìm bạn đồng hành, v.v.).
+      - Độ dài bình luận phải đa dạng: có người viết rất dài và tâm huyết, có người chỉ viết vài chữ ngắn gọn.
+      - Các NPC phải tương tác qua lại với nhau (reply bình luận của nhau).
+      - Trả về định dạng JSON array: [{"author": "Tên NPC", "content": "Nội dung bình luận"}].
+      KHÔNG GIẢI THÍCH, CHỈ TRẢ VỀ JSON.`;
+
+      const stream = sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo bình luận NPC đa dạng tính cách.");
+      
+      let fullText = "";
+      for await (const chunk of stream) {
+        fullText += chunk.text;
+      }
+
+      const parsed = safeParse(fullText);
+      const validComments = validatePosts(parsed);
+      
+      if (validComments.length > 0) {
+        const massiveComments = [];
+        // Duplicate to 500 comments as requested
+        for (let i = 0; i < 500; i++) {
+          const baseComment = validComments[i % validComments.length];
+          massiveComments.push({
+            id: Date.now().toString() + '_bunny_' + i,
+            author: baseComment.author || `NPC_${Math.floor(Math.random() * 10000)}`,
+            avatar: npcAvatars[i % npcAvatars.length],
+            content: baseComment.content
+          });
+        }
+        
+        const newRound = {
+          id: Date.now().toString(),
+          timestamp: new Date().toLocaleString(),
+          count: massiveComments.length,
+          comments: massiveComments
+        };
+
+        setGroupPosts(prev => prev.map(p => p.id === postId ? { 
+          ...p, 
+          comments: [...(p.comments || []), ...massiveComments],
+          bunnyRounds: [...(p.bunnyRounds || []), newRound]
+        } : p));
+        
+        showToast(`Đã gọi thành công ${massiveComments.length} NPC vào bình luận!`);
+      } else {
+        throw new Error("No valid comments found");
       }
     } catch (error) {
       console.error(error);
@@ -632,12 +1010,12 @@ export default function GroupForum({
     if (style === 'style1') {
       return (
         <div className="min-h-full bg-white/40 backdrop-blur-sm p-4 relative overflow-y-auto pb-24 flex items-center justify-center">
-          <div className="w-full max-w-md bg-[#FFC8D2] rounded-[30px] p-6 shadow-[0_0_20px_rgba(255,200,210,0.8)] relative z-10 border-2 border-white/50 text-white animate-in zoom-in-95 duration-500">
-            <div className="text-center whitespace-pre-wrap font-mono text-sm leading-relaxed">
+          <div className="w-full max-w-md bg-[#FFC8D2] rounded-[30px] p-6 shadow-[0_0_20px_rgba(255,200,210,0.8)] relative z-10 border-2 border-white/50 text-white animate-in zoom-in-95 duration-500 max-h-[80vh] flex flex-col">
+            <div className="text-center whitespace-pre-wrap font-mono text-sm leading-relaxed overflow-y-auto scrollbar-hide flex-1">
               {displayContent}
             </div>
             
-            <div className="mt-8 flex justify-center">
+            <div className="mt-8 flex justify-center shrink-0">
               <button 
                 onClick={() => setView('group_detail')}
                 className="px-8 py-3 bg-white text-[#FFC8D2] rounded-full font-bold shadow-md hover:bg-gray-50 transition-transform hover:scale-105 active:scale-95"
@@ -672,15 +1050,15 @@ export default function GroupForum({
             </div>
 
             {/* Card 2 */}
-            <div className="min-w-[260px] snap-center bg-[#F5F5F5] p-4 border border-[#EAE4E4] rounded-sm flex flex-col relative">
-              <div className="text-center mb-4 relative">
+            <div className="min-w-[260px] snap-center bg-[#F5F5F5] p-4 border border-[#EAE4E4] rounded-sm flex flex-col relative h-[450px]">
+              <div className="text-center mb-4 relative shrink-0">
                 <span className="font-[cursive] text-4xl text-[#D3C4C9] absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap z-0">Elegance</span>
-                <span className="relative z-10 text-sm uppercase tracking-widest text-[#8A7D85] bg-[#F5F5F5] px-2">{currentGroup.name}</span>
+                <span className="relative z-10 text-sm uppercase tracking-widest text-[#8A7D85] bg-[#F5F5F5] px-2 truncate block max-w-[200px] mx-auto">{currentGroup.name}</span>
               </div>
-              <div className="w-full h-64 bg-white border border-[#EAE4E4] p-2 mb-4">
+              <div className="w-full h-64 bg-white border border-[#EAE4E4] p-2 mb-4 shrink-0">
                 <img src={currentGroup.illustrationImage || currentGroup.avatar || 'https://picsum.photos/seed/ill2/400/600'} className="w-full h-full object-cover opacity-90" />
               </div>
-              <div className="mt-auto border-y border-[#EAE4E4] py-3 text-center">
+              <div className="mt-auto border-y border-[#EAE4E4] py-3 text-center overflow-y-auto scrollbar-hide max-h-[120px]">
                 <p className="text-[10px] text-[#8A7D85] leading-relaxed">
                   {currentGroup.description || "A place for gentle souls to gather and share their deepest thoughts in tranquility."}
                 </p>
@@ -755,8 +1133,8 @@ export default function GroupForum({
               </div>
               
               {/* Content */}
-              <div className="flex-1">
-                <h3 className="font-bold text-[#8A7D85] text-lg">{g.name}</h3>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-[#8A7D85] text-lg truncate">{g.name}</h3>
                 <p className="text-sm text-[#9E919A] line-clamp-1">{g.topic}</p>
               </div>
 
@@ -836,24 +1214,24 @@ export default function GroupForum({
     return (
       <div className="h-full flex flex-col relative z-10">
         {/* Chat Header */}
-        <div className="flex items-center justify-between p-4 bg-white/60 backdrop-blur-md border-b border-[#FFD1DC] sticky top-0 z-20 shadow-sm">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setView('group_intro')} className="p-2 bg-white/50 rounded-full text-[#F3B4C2] hover:bg-white transition-colors">
+        <div className="flex items-center justify-between p-4 bg-white/60 backdrop-blur-md border-b border-[#FFD1DC] sticky top-0 z-20 shadow-sm shrink-0">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <button onClick={() => setView('group_intro')} className="p-2 bg-white/50 rounded-full text-[#F3B4C2] hover:bg-white transition-colors shrink-0">
               <ArrowLeft size={20} />
             </button>
-            <button onClick={() => setView('api_settings')} className="p-2 bg-white/50 rounded-full text-[#F3B4C2] hover:bg-white transition-colors" title="Cấu hình API">
+            <button onClick={() => setView('api_settings')} className="p-2 bg-white/50 rounded-full text-[#F3B4C2] hover:bg-white transition-colors shrink-0" title="Cấu hình API">
               <Settings size={20} />
             </button>
-            <div className="relative">
-              <img src={currentGroup.avatar || 'https://picsum.photos/seed/avatar/100'} className="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm" />
+            <div className="relative shrink-0">
+              <img src={currentGroup.avatar || 'https://picsum.photos/seed/avatar/100'} className="w-10 h-10 rounded-full object-cover border-2 border-white shadow-sm shrink-0" />
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-white rounded-full"></div>
             </div>
-            <div>
-              <h2 className="font-bold text-[#8A7D85] text-lg leading-tight">{currentGroup.name}</h2>
+            <div className="flex-1 min-w-0">
+              <h2 className="font-bold text-[#8A7D85] text-lg leading-tight truncate">{currentGroup.name}</h2>
               <p className="text-[11px] text-[#9E919A]">{groupPosts.length} bài đăng</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 relative">
+          <div className="flex items-center gap-2 relative shrink-0 ml-2">
             <button 
               onClick={() => setActiveDropdown(activeDropdown === 'group_detail' ? null : 'group_detail')}
               className="p-2 text-[#F3B4C2] hover:bg-white/50 rounded-full transition-colors"
@@ -881,6 +1259,15 @@ export default function GroupForum({
                 >
                   <Megaphone size={16} /> Quảng bá nhóm
                 </button>
+                <button 
+                  onClick={() => {
+                    setView('promote');
+                    setActiveDropdown(null);
+                  }}
+                  className="w-full px-4 py-3 text-left flex items-center gap-3 hover:bg-[#FFF0F5] text-[#8A7D85] transition-colors border-t border-[#FFD1DC]/30"
+                >
+                  <Bookmark size={16} /> Xem lại Quảng Bá
+                </button>
               </div>
             )}
           </div>
@@ -888,18 +1275,44 @@ export default function GroupForum({
 
         {/* Feed Area */}
         <div className="flex-1 overflow-y-auto p-4 pb-32 scrollbar-hide">
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide py-1">
+              <button 
+                onClick={() => setSelectedBatchId(null)}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all whitespace-nowrap ${!selectedBatchId ? 'bg-[#F3B4C2] text-white' : 'bg-white text-[#8A7D85] border border-[#FFD1DC]'}`}
+              >
+                Tất cả
+              </button>
+              {groupBatches.map(batch => (
+                <button 
+                  key={batch.id}
+                  onClick={() => setSelectedBatchId(batch.id)}
+                  className={`px-3 py-1 rounded-full text-xs font-bold transition-all whitespace-nowrap ${selectedBatchId === batch.id ? 'bg-[#F3B4C2] text-white' : 'bg-white text-[#8A7D85] border border-[#FFD1DC]'}`}
+                >
+                  {batch.name}
+                </button>
+              ))}
+            </div>
+            <button 
+              onClick={() => setView('flower_creation')} 
+              className="w-10 h-10 bg-white rounded-full shadow-sm text-xl flex items-center justify-center hover:bg-[#FFF0F5] transition-colors border border-[#FFD1DC] shrink-0"
+              title="Trang chính thức tạo bài đăng"
+            >
+              🌸
+            </button>
+          </div>
           {groupPosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center opacity-80 mt-10">
               <div className="w-24 h-24 bg-white/60 backdrop-blur-sm rounded-full flex items-center justify-center mb-4 shadow-sm border border-[#FFD1DC]">
                 <MessageCircle size={40} className="text-[#F3B4C2]" />
               </div>
               <p className="text-[#8A7D85] font-medium mb-2">Chưa có bài đăng nào</p>
-              <p className="text-[#9E919A] text-sm mb-6 max-w-[250px]">Hãy gọi các NPC vào nhóm để bắt đầu đăng bài nhé!</p>
+              <p className="text-[#9E919A] text-sm mb-6 max-w-[250px]">Hãy bấm vào bông hoa 🌸 để bắt đầu tạo các đợt bài đăng nhé!</p>
               <button 
-                onClick={generateNPCPrompt} 
+                onClick={() => setView('flower_creation')} 
                 className="px-6 py-3 bg-[#F3B4C2] text-white rounded-full font-bold shadow-md hover:bg-[#F9C6D4] transition-transform hover:scale-105 active:scale-95 flex items-center gap-2"
               >
-                <MessageCircle size={18} /> Gọi 20 NPC vào nhóm
+                🌸 Tạo bài đăng mới
               </button>
             </div>
           ) : (
@@ -912,20 +1325,20 @@ export default function GroupForum({
                 return (
                   <div key={post.id} className="bg-white/80 backdrop-blur-md rounded-3xl p-5 shadow-sm border border-[#FFD1DC] animate-in slide-in-from-bottom-4">
                     {/* Post Header */}
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-between mb-4 shrink-0">
+                      <div className="flex items-center gap-3 shrink-0">
                         <img 
                           src={post.avatar || 'https://picsum.photos/seed/avatar/100'} 
-                          className="w-12 h-12 rounded-full object-cover shadow-sm border-2 border-white cursor-pointer hover:scale-105 transition-transform" 
+                          className="w-12 h-12 rounded-full object-cover shadow-sm border-2 border-white cursor-pointer hover:scale-105 transition-transform shrink-0" 
                           onClick={() => {
                             if (!isUser) {
                               openNPCProfile(post.author, post.avatar || 'https://picsum.photos/seed/avatar/100');
                             }
                           }}
                         />
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <h4 
-                            className={`font-bold ${isUser ? 'text-[#F3B4C2]' : 'text-[#8A7D85]'} cursor-pointer hover:underline`}
+                            className={`font-bold ${isUser ? 'text-[#F3B4C2]' : 'text-[#8A7D85]'} cursor-pointer hover:underline truncate max-w-[150px]`}
                             onClick={() => {
                               if (!isUser) {
                                 openNPCProfile(post.author, post.avatar || 'https://picsum.photos/seed/avatar/100');
@@ -937,13 +1350,13 @@ export default function GroupForum({
                           <span className="text-xs text-[#9E919A]">Vừa xong</span>
                         </div>
                       </div>
-                      <button className="text-[#9E919A] hover:text-[#F3B4C2] transition-colors">
+                      <button className="text-[#9E919A] hover:text-[#F3B4C2] transition-colors shrink-0">
                         <MoreVertical size={20} />
                       </button>
                     </div>
                     
                     {/* Post Content */}
-                    <div className="text-[#8A7D85] text-sm leading-relaxed mb-4 whitespace-pre-wrap">
+                    <div className="text-[#8A7D85] text-sm leading-relaxed mb-4 whitespace-pre-wrap max-h-[400px] overflow-y-auto scrollbar-hide">
                       {post.content}
                     </div>
                     
@@ -968,6 +1381,24 @@ export default function GroupForum({
                         <MessageCircle size={18} />
                         <span>{post.comments?.length || 0} Bình luận</span>
                       </button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => handleBunnyComment(post.id, post)}
+                          className="flex items-center justify-center w-8 h-8 bg-[#FFF0F5] rounded-full hover:bg-[#FDE2E4] transition-colors shadow-sm border border-[#FFD1DC]"
+                          title="Gọi 500 NPC vào bình luận"
+                        >
+                          <span className="text-lg">🐰</span>
+                        </button>
+                        {post.bunnyRounds && post.bunnyRounds.length > 0 && (
+                          <div className="flex -space-x-2">
+                            {post.bunnyRounds.slice(-3).map((round: any, idx: number) => (
+                              <div key={round.id} className="w-5 h-5 bg-pink-200 rounded-full border border-white flex items-center justify-center text-[8px] font-bold text-pink-600 shadow-sm" title={`Đợt ${post.bunnyRounds.length - 2 + idx}: ${round.timestamp}`}>
+                                {post.bunnyRounds.length - 2 + idx}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <button className="flex items-center gap-2 text-sm font-medium text-[#9E919A] hover:text-[#F3B4C2] transition-colors ml-auto">
                         <Share2 size={18} />
                       </button>
@@ -980,7 +1411,7 @@ export default function GroupForum({
                           <div key={idx} className="flex gap-3">
                             <img 
                               src={comment.avatar || 'https://picsum.photos/seed/avatar/100'} 
-                              className="w-8 h-8 rounded-full object-cover cursor-pointer hover:scale-105 transition-transform"
+                              className="w-8 h-8 rounded-full object-cover cursor-pointer hover:scale-105 transition-transform shrink-0"
                               onClick={() => openNPCProfile(comment.author, comment.avatar || 'https://picsum.photos/seed/avatar/100')}
                             />
                             <div className="flex-1 bg-gray-50 rounded-2xl p-3">
@@ -990,7 +1421,7 @@ export default function GroupForum({
                               >
                                 {comment.author}
                               </h5>
-                              <p className="text-sm text-[#8A7D85]">{comment.content}</p>
+                              <p className="text-sm text-[#8A7D85] whitespace-pre-wrap max-h-[200px] overflow-y-auto scrollbar-hide">{comment.content}</p>
                             </div>
                           </div>
                         ))}
@@ -1019,6 +1450,8 @@ export default function GroupForum({
                 <img src={currentGroup.avatar || 'https://picsum.photos/seed/avatar/100'} className="w-10 h-10 rounded-full object-cover shadow-sm border border-white shrink-0" />
                 <div className="flex-1 bg-white rounded-2xl border border-[#FFD1DC]/50 px-4 py-3 shadow-inner">
                   <textarea 
+                    value={newPostContent}
+                    onChange={(e) => setNewPostContent(e.target.value)}
                     placeholder="Bạn đang nghĩ gì? Đăng bài vào nhóm nhé..." 
                     className="w-full bg-transparent border-none focus:outline-none text-[#8A7D85] text-sm resize-none max-h-32"
                     rows={2}
@@ -1034,7 +1467,23 @@ export default function GroupForum({
                         <ImageIcon size={18} />
                       </button>
                     </div>
-                    <button className="px-4 py-1.5 bg-[#F3B4C2] text-white rounded-full font-bold text-sm shadow-sm hover:bg-[#F9C6D4] transition-transform hover:scale-105">
+                    <button 
+                      onClick={() => {
+                        if (!newPostContent.trim()) return;
+                        const newPost = {
+                          id: Date.now().toString(),
+                          author: "Chủ nhóm",
+                          avatar: formData.ownerInfo?.avatar || 'https://picsum.photos/seed/avatar/100',
+                          content: newPostContent,
+                          likes: 0,
+                          comments: []
+                        };
+                        setGroupPosts([newPost, ...groupPosts]);
+                        setNewPostContent('');
+                        setActiveDropdown(null);
+                      }}
+                      className="px-4 py-1.5 bg-[#F3B4C2] text-white rounded-full font-bold text-sm shadow-sm hover:bg-[#F9C6D4] transition-transform hover:scale-105"
+                    >
                       Đăng bài
                     </button>
                   </div>
@@ -1049,69 +1498,72 @@ export default function GroupForum({
 
   const generateNPCProfilePosts = async (npcName: string, npcAvatar: string, isLoadMore = false) => {
     setIsLoading(true);
-    setStreamingText('');
+    setLoadingMsg(`Đang tạo bài đăng cho ${npcName}...`);
     
     try {
       const prompt = `Hãy đóng vai NPC "${npcName}" đang hoạt động trong nhóm "${currentGroup?.name}" (chủ đề: ${currentGroup?.topic}).
-      Hãy tạo ra 20 bài đăng trên trang cá nhân Instagram của bạn.
+      Hãy tạo ra 15 bài đăng trên trang cá nhân Instagram của bạn.
       Các bài đăng phải thể hiện rõ tính cách, sở thích cá nhân của bạn, và có liên quan mật thiết đến việc bạn là thành viên của nhóm này.
       Trả về định dạng JSON array: [{"content": "Nội dung bài đăng (caption)"}].
       KHÔNG GIẢI THÍCH, CHỈ TRẢ VỀ JSON.`;
 
-      const stream = await sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo bài đăng cá nhân cho NPC.");
+      const stream = sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo bài đăng cá nhân cho NPC chuyên nghiệp. CHỈ TRẢ VỀ JSON ARRAY HỢP LỆ.");
       
-      if (!stream) throw new Error("No stream");
-
       let fullText = "";
-      
-      if (typeof (stream as any).getReader === 'function') {
-        const reader = (stream as ReadableStream).getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          fullText += chunk;
-          setStreamingText(prev => prev + chunk);
-        }
-      } else {
-        for await (const chunk of stream as any) {
-          const text = chunk.text || "";
-          fullText += text;
-          setStreamingText(prev => prev + text);
-        }
+      for await (const chunk of stream) {
+        fullText += chunk.text;
       }
 
-      try {
-        const match = fullText.match(/\[[\s\S]*\]/);
-        if (match) {
-          const parsed = JSON.parse(match[0]);
-          const newPosts = parsed.map((p: any, i: number) => ({
-            id: (Date.now() + i).toString(),
-            content: p.content,
-            image: `https://picsum.photos/seed/${npcName}_${Date.now()}_${i}/600/600`,
-          }));
-          
-          if (isLoadMore) {
-            setNpcProfilePosts(prev => [...prev, ...newPosts]);
-          } else {
-            setNpcProfilePosts(newPosts);
-          }
+      const parsed = safeParse(fullText);
+      const validPosts = validatePosts(parsed);
+
+      if (validPosts.length > 0) {
+        const newPosts = validPosts.map((p: any, i: number) => ({
+          id: (Date.now() + i).toString() + '_profile_' + Math.random().toString(36).substr(2, 5),
+          content: p.content,
+          image: postImages[(i + Math.floor(Math.random() * 10)) % postImages.length],
+        }));
+        
+        if (isLoadMore) {
+          setNpcProfilePosts(prev => [...prev, ...newPosts]);
+        } else {
+          setNpcProfilePosts(newPosts);
         }
-      } catch (e) {
-        console.error("Failed to parse NPC profile posts JSON", e);
+        showToast(`Đã tạo ${newPosts.length} bài đăng cá nhân!`);
+      } else {
+        showToast("Không thể tạo bài đăng cá nhân. Vui lòng thử lại.");
       }
 
     } catch (error) {
       console.error(error);
+      showToast("Lỗi khi tạo bài đăng cá nhân.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const openNPCProfile = (npcName: string, npcAvatar: string) => {
+  const openNPCProfile = async (npcName: string, npcAvatar: string) => {
     setSelectedNPC({ name: npcName, avatar: npcAvatar });
     setView('npc_profile');
+    
+    try {
+      const savedPosts = await loadForumData(`banhnho_npc_posts_${npcName}`);
+      if (savedPosts && savedPosts.length > 0) {
+        setNpcProfilePosts(savedPosts);
+        return; // Already have posts, don't generate
+      } else {
+        const localPosts = localStorage.getItem(`banhnho_npc_posts_${npcName}`);
+        if (localPosts) {
+          const parsed = JSON.parse(localPosts);
+          if (parsed && parsed.length > 0) {
+            setNpcProfilePosts(parsed);
+            localStorage.removeItem(`banhnho_npc_posts_${npcName}`);
+            return;
+          }
+        }
+      }
+    } catch (e) {}
+    
     generateNPCProfilePosts(npcName, npcAvatar);
   };
 
@@ -1202,6 +1654,20 @@ export default function GroupForum({
       
       <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-[#F9C6D4] flex flex-col gap-4">
         <div>
+          <label className="block text-sm font-bold text-[#8A7D85] mb-1">Loại API (API Type)</label>
+          <select 
+            value={apiSettings.apiType || 'auto'}
+            onChange={(e) => setApiSettings({...apiSettings, apiType: e.target.value as any})}
+            className="w-full p-3 rounded-xl border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] bg-white/50"
+          >
+            <option value="auto">Tự động phát hiện (Auto Detect)</option>
+            <option value="openai">OpenAI-compatible</option>
+            <option value="claude">Claude (Anthropic)</option>
+            <option value="gemini">Gemini</option>
+            <option value="custom">Custom Endpoint</option>
+          </select>
+        </div>
+        <div>
           <label className="block text-sm font-bold text-[#8A7D85] mb-1">Endpoint URL (v1)</label>
           <input 
             type="text" 
@@ -1218,7 +1684,7 @@ export default function GroupForum({
             type="password" 
             value={apiSettings.apiKey}
             onChange={(e) => setApiSettings({...apiSettings, apiKey: e.target.value})}
-            placeholder="sk-..."
+            placeholder="Nhập API Key..."
             className="w-full p-3 rounded-xl border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] bg-white/50"
           />
         </div>
@@ -1375,17 +1841,175 @@ export default function GroupForum({
     </div>
   );
 
-  const renderPromote = () => {
-    return (
-      <div className="h-full flex flex-col p-4 relative z-10 bg-white/60 backdrop-blur-sm">
-        <div className="flex items-center gap-4 mb-6">
-          <button onClick={() => setView('group_intro')} className="p-2 bg-white rounded-full shadow-sm text-[#F3B4C2]">
-            <ArrowLeft size={24} />
-          </button>
-          <h2 className="text-xl font-bold text-[#8A7D85]">Quảng bá nhóm ra Thế Giới</h2>
-        </div>
+  const generatePromoteComments = async () => {
+    setIsLoading(true);
+    setLoadingMsg('Đang gọi NPC xin vào nhóm...');
+    
+    try {
+      const prompt = `Hãy đóng vai 20 người dùng khác nhau đang xem bài quảng bá nhóm "${currentGroup?.name}".
+      Chủ đề nhóm: ${currentGroup?.topic}.
+      Nội dung quảng bá: "${promotePost?.content}".
+      Yêu cầu:
+      - Tạo ra danh sách bình luận xin vào nhóm.
+      - Mỗi bình luận phải thể hiện sở thích, mong muốn khi vào nhóm, phù hợp với chủ đề.
+      - Trả về ĐÚNG định dạng JSON array: [{"author": "Tên người", "content": "Nội dung bình luận"}].
+      - KHÔNG bọc trong markdown, KHÔNG thêm text giải thích, CHỈ trả về JSON hợp lệ.`;
 
-        <div className="bg-white/80 backdrop-blur-md rounded-3xl p-6 shadow-sm border border-[#F9C6D4] flex-1 overflow-y-auto">
+      const stream = sendMessageStream(apiSettings, [{ role: 'user', content: prompt }], "Bạn là hệ thống tạo bình luận NPC chuyên nghiệp. CHỈ TRẢ VỀ JSON ARRAY HỢP LỆ.");
+      
+      let fullText = "";
+      for await (const chunk of stream) {
+        fullText += chunk.text;
+      }
+
+      const parsed = safeParse(fullText);
+      const validComments = validatePosts(parsed);
+
+      if (validComments.length > 0) {
+        const massiveComments: any[] = [];
+        // Atomic generation of 500 comments
+        for (let i = 0; i < 500; i++) {
+          const baseComment = validComments[i % validComments.length];
+          massiveComments.push({
+            id: Date.now().toString() + '_promote_' + i,
+            author: baseComment.author || `User_${i}`,
+            avatar: npcAvatars[i % npcAvatars.length],
+            content: baseComment.content,
+            isLiked: false
+          });
+        }
+        
+        setPromotePost((prev: any) => {
+          if (!prev) return prev;
+          const updated = { ...prev, comments: massiveComments };
+          setPromoteHistory(h => {
+            const filtered = h.filter(item => item.id !== updated.id);
+            return [updated, ...filtered];
+          });
+          return updated;
+        });
+        showToast(`Đã gọi thành công ${massiveComments.length} NPC!`);
+      } else {
+        showToast("Không thể tạo bình luận quảng bá. Vui lòng thử lại.");
+      }
+    } catch (error) {
+      console.error("Generation failed:", error);
+      showToast("Lỗi khi tạo bình luận quảng bá.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLikePromoteComment = (comment: any) => {
+    setPromotePost((prev: any) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        comments: prev.comments.map((c: any) => 
+          c.id === comment.id ? { ...c, isLiked: !c.isLiked } : c
+        )
+      };
+    });
+
+    if (!comment.isLiked) {
+      setApprovedMembers(prev => [...prev, {
+        id: comment.id,
+        name: comment.author,
+        avatar: comment.avatar,
+        bio: comment.content
+      }]);
+    } else {
+      setApprovedMembers(prev => prev.filter(m => m.id !== comment.id));
+    }
+  };
+
+  const renderPromoteTab = () => {
+    // 1. If viewing a specific history item
+    if (selectedHistoryId) {
+      const historyPost = promoteHistory.find(h => h.id === selectedHistoryId);
+      if (!historyPost) {
+        setSelectedHistoryId(null);
+        return null;
+      }
+      return (
+        <div className="max-w-2xl mx-auto space-y-6">
+          <button 
+            onClick={() => setSelectedHistoryId(null)}
+            className="flex items-center gap-2 text-[#F3B4C2] font-bold text-sm hover:underline mb-2"
+          >
+            <ArrowLeft size={16} /> Quay lại danh sách đợt quảng bá
+          </button>
+          
+          <div className="bg-white/80 backdrop-blur-md rounded-3xl p-5 shadow-sm border border-[#FFD1DC]">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <img src={currentGroup?.avatar || 'https://picsum.photos/seed/avatar/100'} className="w-12 h-12 rounded-full object-cover shadow-sm border-2 border-white" />
+                <div>
+                  <h4 className="font-bold text-[#F3B4C2]">Đợt Quảng Bá</h4>
+                  <span className="text-xs text-[#9E919A]">{historyPost.timestamp}</span>
+                </div>
+              </div>
+              <div className="px-3 py-1 bg-[#FFF0F5] rounded-full text-[10px] font-bold text-[#F3B4C2] border border-[#FFD1DC]">
+                ĐÃ LƯU
+              </div>
+            </div>
+            <div className="text-[#8A7D85] text-sm leading-relaxed mb-4 whitespace-pre-wrap max-h-[300px] overflow-y-auto scrollbar-hide">
+              {historyPost.content}
+            </div>
+            {historyPost.image && (
+              <div className="mb-4 rounded-2xl overflow-hidden border border-[#FFD1DC]/50">
+                <img src={historyPost.image} className="w-full h-auto object-cover max-h-[400px]" />
+              </div>
+            )}
+            
+            {/* Comments */}
+            {historyPost.comments && historyPost.comments.length > 0 && (
+              <div className="mt-6 space-y-4">
+                <h5 className="font-bold text-[#8A7D85] text-sm">Bình luận từ NPC ({historyPost.comments.length})</h5>
+                <div className="max-h-[500px] overflow-y-auto pr-2 scrollbar-hide space-y-4">
+                  {historyPost.comments.map((comment: any) => (
+                    <div key={comment.id} className="flex gap-3">
+                      <img src={comment.avatar} className="w-10 h-10 rounded-full object-cover" />
+                      <div className="flex-1">
+                        <div className="bg-[#FFF0F5] rounded-2xl p-3">
+                          <h6 className="font-bold text-sm text-[#8A7D85]">{comment.author}</h6>
+                          <p className="text-sm text-[#8A7D85] mt-1">{comment.content}</p>
+                        </div>
+                        <div className="flex items-center gap-4 mt-1 ml-2">
+                          <button 
+                            onClick={() => handleLikePromoteComment(comment)}
+                            className={`text-xs font-bold transition-colors flex items-center gap-1 ${comment.isLiked ? 'text-red-400' : 'text-[#9E919A] hover:text-[#F3B4C2]'}`}
+                          >
+                            <Heart size={14} fill={comment.isLiked ? "currentColor" : "none"} />
+                            {comment.isLiked ? 'Đã duyệt' : 'Duyệt vào nhóm'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // 2. If creating a new promotion
+    if (isCreatingPromote || (!promotePost && promoteHistory.length === 0)) {
+      return (
+        <div className="bg-white/80 backdrop-blur-md rounded-3xl p-6 shadow-sm border border-[#F9C6D4] max-w-2xl mx-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-bold text-[#8A7D85]">Tạo bài viết quảng bá mới</h3>
+            {promoteHistory.length > 0 && (
+              <button 
+                onClick={() => setIsCreatingPromote(false)}
+                className="text-xs font-bold text-[#9E919A] hover:text-[#F3B4C2]"
+              >
+                Hủy bỏ
+              </button>
+            )}
+          </div>
           <textarea 
             value={promoteContent}
             onChange={(e) => setPromoteContent(e.target.value)}
@@ -1421,81 +2045,324 @@ export default function GroupForum({
           </div>
 
           <button 
-            onClick={async () => {
-              setIsLoading(true);
-              
-              try {
-                const prompt = `Hãy tạo 20 bài đăng quảng bá nhóm "${currentGroup?.name}" ra thế giới.
-                Chủ đề: ${currentGroup?.topic}.
-                Nội dung người dùng đã viết: ${promoteContent}
-                Trả về JSON array: [{"author": "Chủ nhóm", "content": "Nội dung quảng bá"}]. CHỈ JSON.`;
-
-                const response = await fetch('/api/generate-content', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    prompt, 
-                    systemInstruction: "Bạn là hệ thống tạo nội dung.",
-                    apiKey: apiSettings.apiKey,
-                    model: apiSettings.model,
-                    endpoint: apiSettings.endpoint,
-                    maxTokens: apiSettings.maxTokens
-                  })
-                });
-
-                if (!response.ok) throw new Error("Failed to generate posts");
-                
-                const reader = response.body?.getReader();
-                const decoder = new TextDecoder();
-                let fullText = "";
-
-                if (reader) {
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    const chunk = decoder.decode(value, { stream: true });
-                    const lines = chunk.split('\n\n');
-                    for (const line of lines) {
-                      if (line.startsWith('data: ')) {
-                        const data = line.slice(6);
-                        if (data === '[DONE]') break;
-                        try {
-                          const parsed = JSON.parse(data);
-                          if (parsed.text) fullText += parsed.text;
-                        } catch (e) {}
-                      }
-                    }
-                  }
-                }
-
-                try {
-                  const match = fullText.match(/\[[\s\S]*?\]/);
-                  if (match) {
-                    const parsed = JSON.parse(match[0]);
-                    const newPosts = parsed.map((p: any) => ({
-                      id: Date.now().toString() + '_' + Math.random(),
-                      author: p?.author || "Chủ nhóm",
-                      avatar: currentGroup?.avatar || npcAvatars[0],
-                      content: p?.content || promoteContent || "Hãy tham gia nhóm của chúng mình nhé!",
-                      image: promoteImage || `https://picsum.photos/seed/${Math.random()}/600/400`,
-                      likes: Math.floor(Math.random() * 500),
-                      comments: []
-                    }));
-                    setGroupPosts(prev => [...newPosts, ...prev]);
-                  }
-                } catch (e) {
-                  console.error("Failed to parse promo post JSON", e);
-                }
-              } catch (error) {
-                console.error(error);
-              } finally {
-                setIsLoading(false);
-              }
+            onClick={() => {
+              const newPost = {
+                id: Date.now().toString(),
+                content: promoteContent,
+                image: promoteImage,
+                comments: [],
+                timestamp: new Date().toLocaleString()
+              };
+              setPromotePost(newPost);
+              setIsCreatingPromote(false);
             }}
             className="w-full py-4 bg-[#F3B4C2] text-white rounded-2xl font-bold shadow-lg hover:bg-[#F9C6D4] transition-all text-lg flex items-center justify-center gap-2"
           >
-            <Send size={20} /> Đăng bài & Gọi 300 NPC
+            <Send size={20} /> Đăng bài Quảng Bá
           </button>
+        </div>
+      );
+    }
+
+    // 3. Main History View
+    return (
+      <div className="max-w-2xl mx-auto space-y-8">
+        {/* Active Promotion (if any) */}
+        {promotePost && (
+          <div className="bg-white/80 backdrop-blur-md rounded-3xl p-5 shadow-sm border border-[#FFD1DC] relative overflow-hidden">
+            <div className="absolute top-0 right-0 bg-[#F3B4C2] text-white text-[10px] font-bold px-3 py-1 rounded-bl-xl">ĐANG HOẠT ĐỘNG</div>
+            <div className="flex items-center gap-3 mb-4">
+              <img src={currentGroup?.avatar || 'https://picsum.photos/seed/avatar/100'} className="w-12 h-12 rounded-full object-cover shadow-sm border-2 border-white" />
+              <div>
+                <h4 className="font-bold text-[#F3B4C2]">Chủ nhóm</h4>
+                <span className="text-xs text-[#9E919A]">{promotePost.timestamp || 'Vừa xong'}</span>
+              </div>
+            </div>
+            <div className="text-[#8A7D85] text-sm leading-relaxed mb-4 whitespace-pre-wrap max-h-[300px] overflow-y-auto scrollbar-hide">
+              {promotePost.content}
+            </div>
+            {promotePost.image && (
+              <div className="mb-4 rounded-2xl overflow-hidden border border-[#FFD1DC]/50">
+                <img src={promotePost.image} className="w-full h-auto object-cover max-h-[400px]" />
+              </div>
+            )}
+            
+            <div className="flex items-center gap-6 pt-3 border-t border-[#FFD1DC]/50">
+              <button 
+                onClick={generatePromoteComments}
+                className="w-full py-3 bg-[#F3B4C2] text-white rounded-xl font-bold shadow-md hover:bg-[#F9C6D4] transition-all flex items-center justify-center gap-2"
+              >
+                <MessageCircle size={18} /> Gọi 500 NPC xin vào nhóm
+              </button>
+            </div>
+
+            {/* Comments */}
+            {promotePost.comments.length > 0 && (
+              <div className="mt-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h5 className="font-bold text-[#8A7D85] text-sm">Bình luận ({promotePost.comments.length})</h5>
+                  <span className="text-[10px] text-[#9E919A]">Lưu tự động vào lịch sử</span>
+                </div>
+                <div className="max-h-[300px] overflow-y-auto pr-2 scrollbar-hide space-y-4">
+                  {promotePost.comments.map((comment: any) => (
+                    <div key={comment.id} className="flex gap-3">
+                      <img src={comment.avatar} className="w-10 h-10 rounded-full object-cover" />
+                      <div className="flex-1">
+                        <div className="bg-[#FFF0F5] rounded-2xl p-3">
+                          <h6 className="font-bold text-sm text-[#8A7D85]">{comment.author}</h6>
+                          <p className="text-sm text-[#8A7D85] mt-1">{comment.content}</p>
+                        </div>
+                        <div className="flex items-center gap-4 mt-1 ml-2">
+                          <button 
+                            onClick={() => handleLikePromoteComment(comment)}
+                            className={`text-xs font-bold transition-colors flex items-center gap-1 ${comment.isLiked ? 'text-red-400' : 'text-[#9E919A] hover:text-[#F3B4C2]'}`}
+                          >
+                            <Heart size={14} fill={comment.isLiked ? "currentColor" : "none"} />
+                            {comment.isLiked ? 'Đã duyệt' : 'Duyệt vào nhóm'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* History List */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-[#8A7D85] flex items-center gap-2">
+              <Bookmark size={20} className="text-[#F3B4C2]" /> Lịch sử Lưu Quảng Bá
+            </h3>
+            <button 
+              onClick={() => {
+                setIsCreatingPromote(true);
+                setPromoteContent('');
+                setPromoteImage(null);
+              }}
+              className="px-4 py-2 bg-[#FFF0F5] text-[#F3B4C2] rounded-xl font-bold text-xs border border-[#FFD1DC] hover:bg-[#FDE2E4] transition-colors"
+            >
+              + Tạo đợt mới
+            </button>
+          </div>
+
+          {promoteHistory.length === 0 ? (
+            <div className="text-center py-12 bg-white/40 rounded-[40px] border-2 border-dashed border-[#FFD1DC]">
+              <div className="text-4xl mb-3 opacity-50">📋</div>
+              <p className="text-[#9E919A] font-medium">Chưa có đợt quảng bá nào được lưu.</p>
+              <p className="text-xs text-[#9E919A] mt-1">Hãy tạo bài quảng bá để bắt đầu thu hút NPC!</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {promoteHistory.map((historyPost) => (
+                <div 
+                  key={historyPost.id} 
+                  onClick={() => setSelectedHistoryId(historyPost.id)}
+                  className="bg-white/80 backdrop-blur-md rounded-3xl p-5 border border-[#FFD1DC] hover:border-[#F3B4C2] transition-all cursor-pointer group shadow-sm hover:shadow-md"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-[#FFF0F5] flex items-center justify-center text-[#F3B4C2]">
+                        <Megaphone size={16} />
+                      </div>
+                      <span className="text-xs font-bold text-[#8A7D85]">{historyPost.timestamp}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-[#F3B4C2] opacity-0 group-hover:opacity-100 transition-opacity">
+                      Xem chi tiết <ArrowLeft size={10} className="rotate-180" />
+                    </div>
+                  </div>
+                  <p className="text-sm text-[#8A7D85] line-clamp-2 mb-3 font-medium">{historyPost.content}</p>
+                  <div className="flex items-center gap-4 text-[10px] text-[#9E919A] font-bold">
+                    <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-lg">
+                      <MessageCircle size={12} className="text-[#F3B4C2]" /> {historyPost.comments?.length || 0} NPC xin vào
+                    </span>
+                    <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-lg">
+                      <Heart size={12} className="text-red-400" /> {historyPost.comments?.filter((c: any) => c.isLiked).length || 0} Đã duyệt
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderApproveTab = () => {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <h3 className="text-lg font-bold text-[#8A7D85] mb-4">Thành viên đã duyệt ({approvedMembers.length})</h3>
+        {approvedMembers.length === 0 ? (
+          <div className="text-center py-10 bg-white/50 rounded-3xl border border-[#FFD1DC] border-dashed">
+            <p className="text-[#9E919A]">Chưa có thành viên nào được duyệt.</p>
+            <p className="text-sm text-[#9E919A] mt-2">Hãy sang tab Quảng Bá và thả tim bình luận để duyệt nhé!</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {approvedMembers.map(member => (
+              <div key={member.id} className="bg-white/80 backdrop-blur-md rounded-2xl p-4 shadow-sm border border-[#FFD1DC] flex items-center gap-4">
+                <img src={member.avatar} className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-sm" />
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-[#8A7D85] truncate">{member.name}</h4>
+                  <p className="text-xs text-[#9E919A] line-clamp-2 mt-1">{member.bio}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderFlowerCreation = () => {
+    if (!currentGroup) return null;
+
+    return (
+      <div className="fixed inset-0 z-[100] flex flex-col bg-white overflow-hidden">
+        {/* Background Layer */}
+        <div className="absolute inset-0 z-0">
+          <img src={creationBackground} className="w-full h-full object-cover opacity-30 blur-sm" referrerPolicy="no-referrer" />
+          <div className="absolute inset-0 bg-gradient-to-b from-white/80 via-white/40 to-white/80"></div>
+        </div>
+
+        {/* Header */}
+        <div className="relative z-10 flex items-center justify-between p-4 bg-white/60 backdrop-blur-md border-b border-[#FFD1DC]">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setView('group_detail')} className="p-2 bg-white/50 rounded-full text-[#F3B4C2] hover:bg-white transition-colors">
+              <ArrowLeft size={24} />
+            </button>
+            <div>
+              <h2 className="font-bold text-[#8A7D85] text-xl">Trang chính thức tạo bài đăng 🌸</h2>
+              <p className="text-xs text-[#9E919A]">Nhóm: {currentGroup.name}</p>
+            </div>
+          </div>
+          <button 
+            onClick={generateGroupPosts}
+            disabled={isLoading}
+            className={`px-6 py-3 bg-[#F3B4C2] text-white rounded-full font-bold shadow-lg transition-all flex items-center gap-2 ${isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#F9C6D4] hover:scale-105 active:scale-95'}`}
+          >
+            {isLoading ? 'Đang tạo...' : 'Gọi 20 bài đăng ✨'}
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="relative z-10 flex-1 overflow-y-auto p-6 scrollbar-hide">
+          <div className="max-w-4xl mx-auto space-y-8">
+            {/* Background Selection */}
+            <div className="bg-white/80 backdrop-blur-md rounded-3xl p-6 shadow-sm border border-[#FFD1DC]">
+              <h3 className="text-lg font-bold text-[#8A7D85] mb-4 flex items-center gap-2">
+                <span className="text-[#F3B4C2]">🎨</span> Chọn nền cho đợt này
+              </h3>
+              <div className="grid grid-cols-4 sm:grid-cols-8 gap-3">
+                {postImages.map((img, idx) => (
+                  <button 
+                    key={idx}
+                    onClick={() => setCreationBackground(img)}
+                    className={`aspect-square rounded-xl overflow-hidden border-2 transition-all ${creationBackground === img ? 'border-[#F3B4C2] scale-110 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                  >
+                    <img src={img} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Batches History */}
+            <div className="space-y-6">
+              <h3 className="text-lg font-bold text-[#8A7D85] flex items-center gap-2">
+                <span className="text-[#F3B4C2]">📚</span> Các đợt bài đăng đã tạo
+              </h3>
+              
+              {groupBatches.length === 0 ? (
+                <div className="text-center py-12 bg-white/40 backdrop-blur-sm rounded-3xl border border-dashed border-[#FFD1DC] text-[#9E919A]">
+                  Chưa có đợt bài đăng nào. Hãy bấm nút phía trên để tạo đợt đầu tiên!
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {groupBatches.map((batch, bIdx) => (
+                    <div key={batch.id} className="bg-white/60 backdrop-blur-md rounded-3xl overflow-hidden border border-[#FFD1DC] shadow-sm">
+                      <div className="p-4 bg-[#FFF0F5] border-b border-[#FFD1DC] flex justify-between items-center">
+                        <div>
+                          <h4 className="font-bold text-[#F3B4C2] text-lg">{batch.name}</h4>
+                          <p className="text-[10px] text-[#9E919A] uppercase tracking-widest">{batch.timestamp}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-[#8A7D85] bg-white px-3 py-1 rounded-full border border-[#FFD1DC]">
+                            {batch.posts.length} bài
+                          </span>
+                          <button 
+                            onClick={() => {
+                              if (confirm('Bạn có chắc muốn xóa đợt này?')) {
+                                setGroupBatches(prev => prev.filter(b => b.id !== batch.id));
+                                if (selectedBatchId === batch.id) setSelectedBatchId(null);
+                              }
+                            }}
+                            className="p-2 text-red-400 hover:bg-white rounded-full transition-colors"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="p-4 overflow-x-auto scrollbar-hide">
+                        <div className="flex gap-4">
+                          {batch.posts.map((post, pIdx) => (
+                            <div key={post.id} className="min-w-[280px] max-w-[280px] bg-white rounded-2xl p-4 shadow-sm border border-[#FFD1DC]/50 flex flex-col h-[350px]">
+                              <div className="flex items-center gap-2 mb-3">
+                                <img src={post.avatar} className="w-8 h-8 rounded-full object-cover border border-[#FFD1DC]" />
+                                <span className="font-bold text-[#8A7D85] text-xs truncate">{post.author}</span>
+                              </div>
+                              <div className="flex-1 text-[11px] text-[#8A7D85] leading-relaxed overflow-y-auto scrollbar-hide mb-3 italic">
+                                "{post.content.substring(0, 300)}..."
+                              </div>
+                              {post.image && (
+                                <div className="h-24 rounded-xl overflow-hidden mb-2">
+                                  <img src={post.image} className="w-full h-full object-cover" />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderPromote = () => {
+    return (
+      <div className="h-full flex flex-col bg-[#FDFBFB] relative z-10">
+        {/* Header with Tabs */}
+        <div className="flex items-center justify-between p-4 bg-white/80 backdrop-blur-md border-b border-[#FFD1DC] sticky top-0 z-20">
+          <button onClick={() => setView('group_detail')} className="p-2 bg-white/50 rounded-full text-[#F3B4C2] hover:bg-white transition-colors">
+            <ArrowLeft size={20} />
+          </button>
+          <div className="flex bg-[#FFF0F5] rounded-full p-1">
+            <button 
+              onClick={() => setPromoteTab('promote')}
+              className={`px-4 py-2 rounded-full text-sm font-bold transition-colors ${promoteTab === 'promote' ? 'bg-white text-[#F3B4C2] shadow-sm' : 'text-[#8A7D85]'}`}
+            >
+              Quảng Bá
+            </button>
+            <button 
+              onClick={() => setPromoteTab('approve')}
+              className={`px-4 py-2 rounded-full text-sm font-bold transition-colors ${promoteTab === 'approve' ? 'bg-white text-[#F3B4C2] shadow-sm' : 'text-[#8A7D85]'}`}
+            >
+              Duyệt Người ({approvedMembers.length})
+            </button>
+          </div>
+          <div className="w-10"></div> {/* Spacer */}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 pb-24">
+          {promoteTab === 'promote' ? renderPromoteTab() : renderApproveTab()}
         </div>
       </div>
     );
@@ -1508,6 +2375,7 @@ export default function GroupForum({
       {view === 'group_intro' && renderGroupIntro()}
       {view === 'group_detail' && renderGroupDetail()}
       {view === 'npc_profile' && renderNPCProfile()}
+      {view === 'flower_creation' && renderFlowerCreation()}
       {view === 'promote' && renderPromote()}
       {view === 'api_settings' && renderApiSettings()}
       {view === 'list' && renderList()}

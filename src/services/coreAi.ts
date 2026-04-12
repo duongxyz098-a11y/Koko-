@@ -58,32 +58,29 @@ export const sendCoreMessageStream = async (
   ].filter(Boolean).join("\n") : "";
 
   const messages = [...history, { role: 'user', content: message } as ChatMessage];
-
-  const stream = await sendMessageStream(
+  
+  const streamGenerator = sendMessageStream(
     apiSettings || { endpoint: '', apiKey: '', model: '', systemPrompt: '', maxTokens: 3000 },
     messages,
     systemInstruction
   );
 
-  // If it's a Gemini stream, we need to convert it to a Response
-  if (stream && typeof (stream as any).stream === 'object') {
-    const readable = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        try {
-          for await (const chunk of (stream as any).stream) {
-            const text = chunk.text();
+  const readable = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      try {
+        for await (const chunk of streamGenerator) {
+          const text = chunk.text;
+          if (text) {
             controller.enqueue(encoder.encode(text));
           }
-          controller.close();
-        } catch (e) {
-          controller.error(e);
         }
+        controller.close();
+      } catch (e) {
+        controller.error(e);
       }
-    });
-    return new Response(readable);
-  }
+    }
+  });
 
-  // If it's already a ReadableStream (from fetch)
-  return new Response(stream as ReadableStream);
+  return new Response(readable);
 };

@@ -46,19 +46,6 @@ export default React.memo(function KikokoNPCNovelWriting({
   
   // State for novels per NPC
   const [npcNovels, setNpcNovels] = useState<Record<string, NPCNovelData>>(currentStory.npcNovels || {});
-
-  const isInitialLoad = useRef(true);
-  useEffect(() => {
-    if (isInitialLoad.current) {
-      isInitialLoad.current = false;
-      return;
-    }
-    updateStory({ npcNovels });
-  }, [npcNovels, updateStory]);
-
-  useEffect(() => {
-    setNpcNovels(currentStory.npcNovels || {});
-  }, [currentStory.npcNovels]);
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
@@ -168,6 +155,9 @@ export default React.memo(function KikokoNPCNovelWriting({
         if (chapter) {
           if (contentToSave) chapter.content = contentToSave;
           if (titleToSave) chapter.title = titleToSave;
+          
+          // Persist the updated state
+          updateStory({ npcNovels: updatedNovels });
         }
         return updatedNovels;
       });
@@ -201,6 +191,7 @@ export default React.memo(function KikokoNPCNovelWriting({
         2. TIẾN TRÌNH DẦN DẦN: Mỗi phản hồi chỉ được phép xử lý tối đa 10-15% tiến trình của một Plot Point. Tập trung vào nội tâm, ánh mắt, cử chỉ thay vì nhảy vọt tới kết quả.
         3. DUY TRÌ TRẠNG THÁI: Trạng thái tâm lý (ví dụ: Giận dữ, Nghi ngờ) phải được bảo toàn qua nhiều chương cho đến khi có biến cố lớn hoặc lệnh thay đổi từ người dùng.
         4. ĐOẠN KẾT: Kết thúc chương bằng một câu trọn vẹn, có nghĩa, kết thúc bằng dấu chấm (.), không được lấp lửng, nhưng phải mở ra hướng cho chương tiếp theo một cách liền mạch.
+        5. CẤM SỬ DỤNG KÝ TỰ ĐẶC BIỆT CHO THUẬT NGỮ: Tuyệt đối KHÔNG được để các thuật ngữ, tên riêng, hoặc từ ngữ nhấn mạnh trong dấu ngoặc đơn () hoặc dấu sao *. Hãy viết chúng như những từ ngữ bình thường trong văn bản tiểu thuyết. Ví dụ: viết "shoji" thay vì "*shoji*" hay "(shoji)".
 
         CẤU TRÚC TRẢ VỀ: Trả về một đối tượng JSON duy nhất có dạng:
         {
@@ -341,6 +332,7 @@ export default React.memo(function KikokoNPCNovelWriting({
             const chapter = novel?.chapters[novel.currentChapterIndex];
             if (chapter) {
               chapter.content = streamingContent;
+              updateStory({ npcNovels: updatedNovels });
             }
             return updatedNovels;
           });
@@ -369,6 +361,7 @@ export default React.memo(function KikokoNPCNovelWriting({
     novel.chapters.push(newChapter);
     novel.currentChapterIndex = novel.chapters.length - 1;
     setNpcNovels(updatedNovels);
+    updateStory({ npcNovels: updatedNovels });
   };
 
   const deleteChapter = () => {
@@ -388,6 +381,7 @@ export default React.memo(function KikokoNPCNovelWriting({
   };
 
   const saveNovel = () => {
+    updateStory({ npcNovels });
     alert("Đã lưu tiểu thuyết thành công! Nội dung của bạn đã được bảo vệ.");
   };
 
@@ -398,6 +392,7 @@ export default React.memo(function KikokoNPCNovelWriting({
     const updated = { ...npcNovels };
     updated[activeProfile.id].currentChapterIndex = index;
     setNpcNovels(updated);
+    updateStory({ npcNovels: updated });
   };
 
   const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -412,6 +407,7 @@ export default React.memo(function KikokoNPCNovelWriting({
       }
       updatedNovels[activeProfile.id].backgroundImage = base64;
       setNpcNovels(updatedNovels);
+      updateStory({ npcNovels: updatedNovels });
     };
     reader.readAsDataURL(file);
   };
@@ -509,56 +505,14 @@ export default React.memo(function KikokoNPCNovelWriting({
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               className="absolute top-0 left-0 bottom-0 w-72 bg-white/95 backdrop-blur-md shadow-2xl border-r border-pink-100 flex flex-col z-[7001]"
-              style={currentNPCNovel?.backgroundImage ? { backgroundImage: `url(${currentNPCNovel.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' } : {}}
             >
               <div className="p-6 border-b border-pink-50 flex items-center justify-between">
                 <h3 className="font-bold text-[#D18E9B] flex items-center gap-2">
                   <Book size={18} /> Danh sách chương
                 </h3>
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                            const imageUrl = reader.result as string;
-                            setNpcNovels(prevNovels => {
-                              const updatedNovels = { ...prevNovels };
-                              if (activeProfile) {
-                                if (!updatedNovels[activeProfile.id]) {
-                                  updatedNovels[activeProfile.id] = { chapters: [], currentChapterIndex: 0 };
-                                }
-                                updatedNovels[activeProfile.id].backgroundImage = imageUrl;
-                              }
-                              return updatedNovels;
-                            });
-                          };
-                          reader.readAsDataURL(file);
-                        }
-                      }}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                    <button className="text-stone-400 hover:text-[#D18E9B] transition-colors">
-                      <ImageIcon size={16} />
-                    </button>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setShowSettings(!showSettings);
-                      setShowDrawer(false);
-                    }}
-                    className="text-stone-400 hover:text-[#D18E9B] transition-colors"
-                  >
-                    <Heart size={16} />
-                  </button>
-                  <button onClick={() => setShowDrawer(false)} className="text-stone-400 hover:text-stone-600">
-                    <X size={20} />
-                  </button>
-                </div>
+                <button onClick={() => setShowDrawer(false)} className="text-stone-400 hover:text-stone-600">
+                  <X size={20} />
+                </button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
                 {currentNPCNovel?.chapters.map((ch, idx) => (
@@ -578,7 +532,7 @@ export default React.memo(function KikokoNPCNovelWriting({
                   </button>
                 ))}
               </div>
-              <div className="p-4 border-t border-pink-50 space-y-2">
+              <div className="p-4 border-t border-pink-50">
                 <button 
                   onClick={() => {
                     addChapter();
@@ -588,36 +542,6 @@ export default React.memo(function KikokoNPCNovelWriting({
                 >
                   <Plus size={14} /> Thêm chương mới
                 </button>
-                <div className="relative">
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                          const imageUrl = reader.result as string;
-                          setNpcNovels(prevNovels => {
-                            const updatedNovels = { ...prevNovels };
-                            if (activeProfile) {
-                              if (!updatedNovels[activeProfile.id]) {
-                                updatedNovels[activeProfile.id] = { chapters: [], currentChapterIndex: 0 };
-                              }
-                              updatedNovels[activeProfile.id].backgroundImage = imageUrl;
-                            }
-                            return updatedNovels;
-                          });
-                        };
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                  <button className="w-full py-3 bg-pink-50 text-[#D18E9B] rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-pink-100 transition-all">
-                    <ImageIcon size={14} /> Chọn ảnh nền ngăn kéo
-                  </button>
-                </div>
               </div>
             </motion.div>
           </div>
@@ -716,13 +640,7 @@ export default React.memo(function KikokoNPCNovelWriting({
       </AnimatePresence>
 
       {/* Main Canvas */}
-      <div 
-        className="flex-1 overflow-y-auto custom-scrollbar relative"
-        style={currentNPCNovel?.backgroundImage ? { backgroundImage: `url(${currentNPCNovel.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' } : {}}
-      >
-        {/* Bubble Overlay */}
-        <div className="min-h-full bg-[rgba(255,240,245,0.85)] px-5 py-8">
-        
+      <div className="flex-1 overflow-y-auto px-5 py-8 custom-scrollbar relative">
         {/* Navigation Buttons */}
         <div className="fixed left-4 top-1/2 -translate-y-1/2 z-[5500] flex flex-col gap-4">
           <button
@@ -745,13 +663,13 @@ export default React.memo(function KikokoNPCNovelWriting({
           </button>
         </div>
 
-        <div className="w-full relative z-10">
+        <div className="w-full">
           <motion.div 
             layout
             className="bg-transparent rounded-[20px] p-0 min-h-[80vh] relative"
           >
             {/* Content */}
-            <div className="w-full px-5">
+            <div className="max-w-none">
               <h2 className="text-2xl font-bold text-[#3E2723] mb-12 text-center opacity-80">
                 {currentChapter?.title}
               </h2>
@@ -762,7 +680,6 @@ export default React.memo(function KikokoNPCNovelWriting({
               />
             </div>
           </motion.div>
-        </div>
         </div>
       </div>
 
@@ -818,7 +735,7 @@ export default React.memo(function KikokoNPCNovelWriting({
           margin-bottom: 2rem;
           text-indent: 2.5rem;
           word-spacing: 0.15em;
-          line-height: 1.8;
+          line-height: 2;
           color: #3E2723;
           font-weight: 500;
         }

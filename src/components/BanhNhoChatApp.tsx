@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import { ArrowLeft, Settings, Database, List, Instagram, Clock, Key, CreditCard, Info, Image as ImageIcon, Youtube, Users, BookOpen, FileText, Shield, Wallet, Mic, Video, Globe, PlusCircle, PawPrint, LayoutList } from 'lucide-react';
 import { loadCards, saveDraft, saveBackground, loadBackgrounds, clearDrafts } from '../utils/db';
 import { safeSetItem } from '../utils/storage';
@@ -8,6 +8,50 @@ import Tab1CreateBot from './banhnho/Tab1CreateBot';
 import BotCardGallery from './banhnho/BotCardGallery';
 import { RoleplayChat } from './banhnho/RoleplayChat';
 import GroupForum from './banhnho/GroupForum';
+
+const TabContext = React.createContext<{ tabBgs: Record<string, string>, onUploadClick: () => void }>({ tabBgs: {}, onUploadClick: () => {} });
+
+const TabWrapper = ({ children, tabId }: { children: React.ReactNode, tabId: string }) => {
+  const { tabBgs, onUploadClick } = useContext(TabContext);
+  const bg = tabBgs[tabId];
+  return (
+    <div className={`h-full relative overflow-hidden ${!bg ? 'bg-heart-pattern' : 'bg-[#FAF9F6]'}`}>
+      {/* Background Image without Blur */}
+      {bg && (
+        <div 
+          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
+          style={{ 
+            backgroundImage: `url('${bg}')`
+          }}
+        />
+      )}
+      
+      {/* 2.1 Overlay "milky" */}
+      <div className="absolute inset-0 z-0 bg-[rgba(255,255,255,0.2)] pointer-events-none" />
+
+      {/* 2.3 Pink tint */}
+      <div className="absolute inset-0 z-0 bg-[#F9C6D4] opacity-10 mix-blend-soft-light pointer-events-none" />
+
+      {/* Upload Button */}
+      <div className="absolute bottom-24 right-4 z-20">
+        <button 
+          onClick={onUploadClick} 
+          className="p-3 bg-white/60 backdrop-blur-md rounded-full hover:bg-white/80 shadow-md border border-white/40 transition-all"
+          title="Đổi ảnh nền"
+        >
+          <ImageIcon size={24} className="text-[#F3B4C2]" />
+        </button>
+      </div>
+
+      {/* Content Area */}
+      <div 
+        className="relative z-10 h-full overflow-y-auto"
+      >
+        {children}
+      </div>
+    </div>
+  );
+};
 
 export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('banhnho_active_tab') || 'tab1');
@@ -47,7 +91,8 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
       model: 'gpt-3.5-turbo',
       maxTokens: 30000,
       isUnlimited: false,
-      timeoutMinutes: 2
+      timeoutMinutes: 2,
+      apiType: 'auto'
     };
   });
 
@@ -189,48 +234,7 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const TabWrapper = ({ children, tabId }: { children: React.ReactNode, tabId: string }) => {
-    const bg = tabBgs[tabId];
-    return (
-      <div className={`h-full relative overflow-hidden ${!bg ? 'bg-heart-pattern' : 'bg-[#FAF9F6]'}`}>
-        {/* Background Image without Blur */}
-        {bg && (
-          <div 
-            className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
-            style={{ 
-              backgroundImage: `url('${bg}')`
-            }}
-          />
-        )}
-        
-        {/* 2.1 Overlay "milky" */}
-        <div className="absolute inset-0 z-0 bg-[rgba(255,255,255,0.2)] pointer-events-none" />
-
-        {/* 2.3 Pink tint */}
-        <div className="absolute inset-0 z-0 bg-[#F9C6D4] opacity-10 mix-blend-soft-light pointer-events-none" />
-
-        {/* Upload Button */}
-        <div className="absolute bottom-24 right-4 z-20">
-          <button 
-            onClick={() => bgInputRef.current?.click()} 
-            className="p-3 bg-white/60 backdrop-blur-md rounded-full hover:bg-white/80 shadow-md border border-white/40 transition-all"
-            title="Đổi ảnh nền"
-          >
-            <ImageIcon size={24} className="text-[#F3B4C2]" />
-          </button>
-        </div>
-
-        {/* Content Area */}
-        <div 
-          className="relative z-10 h-full overflow-y-auto"
-        >
-          {children}
-        </div>
-      </div>
-    );
-  };
-
-  const [isNavVisible, setIsNavVisible] = useState(true);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   // Load cards for gallery
   const [savedCards, setSavedCards] = useState<any[]>([]);
@@ -408,6 +412,21 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
               
               <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-sm border border-[#F9C6D4] flex flex-col gap-4">
                 <div>
+                  <label className="block text-sm font-bold text-[#8A7D85] mb-1">Loại API (API Type)</label>
+                  <select 
+                    value={apiSettings.apiType || 'auto'}
+                    onChange={(e) => setApiSettings({...apiSettings, apiType: e.target.value as any})}
+                    className="w-full p-3 rounded-xl border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] bg-white/50"
+                  >
+                    <option value="auto">Tự động phát hiện (Auto Detect)</option>
+                    <option value="openai">OpenAI-compatible</option>
+                    <option value="claude">Claude (Anthropic)</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="custom">Custom Endpoint</option>
+                  </select>
+                </div>
+
+                <div>
                   <label className="block text-sm font-bold text-[#8A7D85] mb-1">Endpoint URL (v1)</label>
                   <input 
                     type="text" 
@@ -424,7 +443,7 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
                     type="password" 
                     value={apiSettings.apiKey}
                     onChange={(e) => setApiSettings({...apiSettings, apiKey: e.target.value})}
-                    placeholder="sk-..."
+                    placeholder="Nhập API Key..."
                     className="w-full p-3 rounded-xl border border-[#F9C6D4] focus:outline-none focus:ring-2 focus:ring-[#F3B4C2] bg-white/50"
                   />
                 </div>
@@ -687,11 +706,13 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="w-full h-screen flex flex-col font-sans overflow-hidden bg-heart-pattern relative">
-      <div className="absolute top-4 left-4 z-50">
-        <button onClick={onBack} className="bg-white/80 backdrop-blur px-3 py-1 rounded-full text-sm font-bold text-[#F3B4C2] shadow-sm border border-[#F9C6D4]">
-          ← Thoát
-        </button>
-      </div>
+      {!isFullScreen && (
+        <div className="absolute top-4 left-4 z-50">
+          <button onClick={onBack} className="bg-white/80 backdrop-blur px-3 py-1 rounded-full text-sm font-bold text-[#F3B4C2] shadow-sm border border-[#F9C6D4]">
+            ← Thoát
+          </button>
+        </div>
+      )}
 
       <input 
         type="file" 
@@ -701,24 +722,26 @@ export default function BanhNhoChatApp({ onBack }: { onBack: () => void }) {
         onChange={handleBgUpload} 
       />
 
-      <div className={`flex-1 overflow-hidden transition-all duration-500 ${isNavVisible ? 'pb-[80px]' : 'pb-0'}`}>
-        {renderTabContent()}
+      <div className={`flex-1 overflow-hidden transition-all duration-500 ${!isFullScreen ? 'pb-[80px]' : 'pb-0'}`}>
+        <TabContext.Provider value={{ tabBgs, onUploadClick: () => bgInputRef.current?.click() }}>
+          {renderTabContent()}
+        </TabContext.Provider>
       </div>
 
       {/* Scrollable Bottom Navigation Wrapper */}
       <div 
         className="fixed bottom-0 left-0 w-full z-50 transition-all duration-500 ease-in-out"
         style={{ 
-          transform: isNavVisible ? 'translateY(0)' : 'translateY(100%)',
+          transform: !isFullScreen ? 'translateY(0)' : 'translateY(100%)',
           pointerEvents: 'none' // Allow clicks to pass through the wrapper itself
         }}
       >
         {/* Toggle Button - Heart Icon */}
         <button 
-          onClick={() => setIsNavVisible(!isNavVisible)}
-          className={`absolute -top-10 right-6 w-7 h-7 bg-[#FDE2E4] rounded-full shadow-md flex items-center justify-center border border-[#9E919A] hover:scale-110 transition-all z-50 cursor-pointer ${!isNavVisible ? 'translate-y-6' : ''}`}
+          onClick={() => setIsFullScreen(prev => !prev)}
+          className={`absolute -top-10 right-6 w-7 h-7 bg-[#FDE2E4] rounded-full shadow-md flex items-center justify-center border border-[#9E919A] hover:scale-110 transition-all z-50 cursor-pointer ${isFullScreen ? 'translate-y-6' : ''}`}
           style={{ pointerEvents: 'auto' }}
-          title={isNavVisible ? "Ẩn thanh điều hướng" : "Hiện thanh điều hướng"}
+          title={!isFullScreen ? "Ẩn thanh điều hướng" : "Hiện thanh điều hướng"}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="#F3B4C2" stroke="#9E919A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
         </button>

@@ -7,6 +7,7 @@ export const loadApiSettings = (): ApiProxySettings => {
     model: 'gpt-3.5-turbo',
     maxTokens: 1000,
     timeoutMinutes: 2,
+    apiType: 'auto'
   };
 
   try {
@@ -19,6 +20,7 @@ export const loadApiSettings = (): ApiProxySettings => {
         model: parsed.model || defaultSettings.model,
         maxTokens: parsed.maxTokens || defaultSettings.maxTokens,
         timeoutMinutes: parsed.timeout || defaultSettings.timeoutMinutes,
+        apiType: parsed.apiType || defaultSettings.apiType,
       };
     }
   } catch (e) {

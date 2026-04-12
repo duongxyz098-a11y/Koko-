@@ -7,7 +7,8 @@ const STORY_STORE_NAME = 'stories';
 const KIKOKO_STORY_STORE_NAME = 'kikoko_stories';
 const KIKOKO_IG_STORE_NAME = 'kikoko_ig';
 const CHAT_STORE_NAME = 'chat_history';
-const VERSION = 6;
+const FORUM_STORE_NAME = 'forum_data';
+const VERSION = 9;
 
 export async function getDB(): Promise<IDBPDatabase> {
   return openDB(DB_NAME, VERSION, {
@@ -29,6 +30,9 @@ export async function getDB(): Promise<IDBPDatabase> {
       }
       if (!db.objectStoreNames.contains(KIKOKO_IG_STORE_NAME)) {
         db.createObjectStore(KIKOKO_IG_STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(FORUM_STORE_NAME)) {
+        db.createObjectStore(FORUM_STORE_NAME);
       }
     },
   });
@@ -169,4 +173,14 @@ export async function saveGalleryBackground(base64: string) {
 export async function loadGalleryBackground(): Promise<string | null> {
   const db = await getDB();
   return (await db.get(BG_STORE_NAME, 'kikoko_gallery_background')) || null;
+}
+
+export async function saveForumData(key: string, value: any) {
+  const db = await getDB();
+  await db.put(FORUM_STORE_NAME, value, key);
+}
+
+export async function loadForumData(key: string): Promise<any> {
+  const db = await getDB();
+  return await db.get(FORUM_STORE_NAME, key);
 }

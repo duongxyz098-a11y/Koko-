@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, Heart, MessageCircle, User, Home, Users, PenTool, Plus, Cat, Image as ImageIcon, Settings, ChevronRight, X, HelpCircle, RefreshCw, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getLargeData, setLargeData } from '../utils/storage';
 
 const IMAGES = [
   "https://i.postimg.cc/g2sJpzTQ/b5bd0d7e59c0f46d4d4ab564f47739a8.jpg",
@@ -314,28 +315,67 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
   };
   
   // Data States
-  const [npcs, setNpcs] = useState<any[]>(() => {
-    const saved = localStorage.getItem('rengram_npcs');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [posts, setPosts] = useState<any[]>(() => {
-    const saved = localStorage.getItem('rengram_posts');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [npcs, setNpcs] = useState<any[]>([]);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+  useEffect(() => {
+    const loadData = async () => {
+      const savedNpcs = await getLargeData('rengram_npcs');
+      if (savedNpcs) {
+        setNpcs(savedNpcs);
+      } else {
+        const localNpcs = localStorage.getItem('rengram_npcs');
+        if (localNpcs) {
+          setNpcs(JSON.parse(localNpcs));
+          localStorage.removeItem('rengram_npcs');
+        }
+      }
+
+      const savedPosts = await getLargeData('rengram_posts');
+      if (savedPosts) {
+        setPosts(savedPosts);
+      } else {
+        const localPosts = localStorage.getItem('rengram_posts');
+        if (localPosts) {
+          setPosts(JSON.parse(localPosts));
+          localStorage.removeItem('rengram_posts');
+        }
+      }
+      setIsDataLoaded(true);
+    };
+    loadData();
+  }, []);
+
   const [loadingNPCs, setLoadingNPCs] = useState(false);
   const [npcAbortController, setNpcAbortController] = useState<AbortController | null>(null);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [threadsAbortController, setThreadsAbortController] = useState<AbortController | null>(null);
   const [novelAbortController, setNovelAbortController] = useState<AbortController | null>(null);
   const [flippedPosts, setFlippedPosts] = useState<Record<string, boolean>>({});
-  const [cardBgs, setCardBgs] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('rengram_card_bgs');
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [cardBgs, setCardBgs] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    localStorage.setItem('rengram_card_bgs', JSON.stringify(cardBgs));
-  }, [cardBgs]);
+    const loadCardBgs = async () => {
+      const savedBgs = await getLargeData('rengram_card_bgs');
+      if (savedBgs) {
+        setCardBgs(savedBgs);
+      } else {
+        const localBgs = localStorage.getItem('rengram_card_bgs');
+        if (localBgs) {
+          setCardBgs(JSON.parse(localBgs));
+          localStorage.removeItem('rengram_card_bgs');
+        }
+      }
+    };
+    loadCardBgs();
+  }, []);
+
+  useEffect(() => {
+    if (isDataLoaded) {
+      setLargeData('rengram_card_bgs', cardBgs);
+    }
+  }, [cardBgs, isDataLoaded]);
 
   const handleCardBgUpload = (e: React.ChangeEvent<HTMLInputElement>, cardId: string) => {
     const file = e.target.files?.[0];
@@ -353,34 +393,57 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
   };
 
   useEffect(() => {
-    localStorage.setItem('rengram_npcs', JSON.stringify(npcs));
-  }, [npcs]);
+    if (isDataLoaded) {
+      setLargeData('rengram_npcs', npcs);
+    }
+  }, [npcs, isDataLoaded]);
 
   useEffect(() => {
-    localStorage.setItem('rengram_posts', JSON.stringify(posts));
-  }, [posts]);
+    if (isDataLoaded) {
+      setLargeData('rengram_posts', posts);
+    }
+  }, [posts, isDataLoaded]);
   
   // Profile States
-  const [userProfile, setUserProfile] = useState(() => {
-    const saved = localStorage.getItem('rengram_profile');
-    const parsed = saved ? JSON.parse(saved) : null;
-    return parsed ? {
-      ...parsed,
-      avatar: parsed.avatar || IMAGES[0],
-      cover: parsed.cover || IMAGES[1],
-      myPosts: parsed.myPosts?.map((post: any) => ({
-        ...post,
-        image: post.image || IMAGES[Math.floor(Math.random() * IMAGES.length)],
-        avatar: post.avatar || IMAGES[0]
-      })) || []
-    } : {
-      name: "RenGram User",
-      avatar: IMAGES[0],
-      cover: IMAGES[1],
-      bio: "feeling: sleepy 🎀✨",
-      myPosts: [] as any[]
-    };
+  const [userProfile, setUserProfile] = useState<any>({
+    name: "RenGram User",
+    avatar: IMAGES[0],
+    cover: IMAGES[1],
+    bio: "feeling: sleepy 🎀✨",
+    myPosts: [] as any[]
   });
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      const savedProfile = await getLargeData('rengram_profile');
+      if (savedProfile) {
+        setUserProfile(savedProfile);
+      } else {
+        const localProfile = localStorage.getItem('rengram_profile');
+        if (localProfile) {
+          const parsed = JSON.parse(localProfile);
+          setUserProfile({
+            ...parsed,
+            avatar: parsed.avatar || IMAGES[0],
+            cover: parsed.cover || IMAGES[1],
+            myPosts: parsed.myPosts?.map((post: any) => ({
+              ...post,
+              image: post.image || IMAGES[Math.floor(Math.random() * IMAGES.length)],
+              avatar: post.avatar || IMAGES[0]
+            })) || []
+          });
+          localStorage.removeItem('rengram_profile');
+        }
+      }
+    };
+    loadProfile();
+  }, []);
+
+  useEffect(() => {
+    if (isDataLoaded) {
+      setLargeData('rengram_profile', userProfile);
+    }
+  }, [userProfile, isDataLoaded]);
 
   const [editingPost, setEditingPost] = useState<any | null>(null);
   const [editCaption, setEditCaption] = useState('');
@@ -408,29 +471,6 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
     setEditCaption('');
   };
 
-
-  useEffect(() => {
-    // Don't save base64 images to localStorage to avoid quota exceeded errors
-    const profileToSave = {
-      ...userProfile,
-      avatar: userProfile.avatar?.startsWith('data:image') ? undefined : userProfile.avatar,
-      cover: userProfile.cover?.startsWith('data:image') ? undefined : userProfile.cover,
-      myPosts: userProfile.myPosts?.map((post: any) => ({
-        ...post,
-        image: post.image?.startsWith('data:image') ? undefined : post.image,
-        avatar: post.avatar?.startsWith('data:image') ? undefined : post.avatar
-      }))
-    };
-    try {
-      localStorage.setItem('rengram_profile', JSON.stringify(profileToSave));
-    } catch (e) {
-      console.error("Failed to save to localStorage:", e);
-      // If quota exceeded, try clearing old data
-      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-        localStorage.removeItem('rengram_profile');
-      }
-    }
-  }, [userProfile]);
 
   const [homeTopic, setHomeTopic] = useState(() => localStorage.getItem('rengram_home_topic') || '');
   
@@ -487,24 +527,38 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
   }, [isGeneratingNovel]);
 
   // Novel States
-  const [novelCards, setNovelCards] = useState<any[]>(() => {
-    const saved = localStorage.getItem('rengram_novel_cards');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return [
-      { id: 'genre', title: 'Thể loại Việt', content: '', image: '', isEditing: true },
-      { id: 'direction', title: 'Hướng phát triển câu chuyện', content: '', image: '', isEditing: true },
-      { id: 'couple', title: 'Thông tin cặp đôi chính', content: '', image: '', isEditing: true },
-      { id: 'subGenre', title: 'Thể loại phụ', content: '', image: '', isEditing: true },
-      { id: 'history', title: 'Lịch sử/Quá khứ của nhân vật chính', content: '', image: '', isEditing: true },
-      { id: 'length', title: 'Yêu cầu độ dài ký tự cho chương truyện', content: '', image: '', isEditing: true }
-    ];
-  });
+  const [novelCards, setNovelCards] = useState<any[]>([
+    { id: 'genre', title: 'Thể loại Việt', content: '', image: '', isEditing: true },
+    { id: 'direction', title: 'Hướng phát triển câu chuyện', content: '', image: '', isEditing: true },
+    { id: 'couple', title: 'Thông tin cặp đôi chính', content: '', image: '', isEditing: true },
+    { id: 'subGenre', title: 'Thể loại phụ', content: '', image: '', isEditing: true },
+    { id: 'history', title: 'Lịch sử/Quá khứ của nhân vật chính', content: '', image: '', isEditing: true },
+    { id: 'length', title: 'Yêu cầu độ dài ký tự cho chương truyện', content: '', image: '', isEditing: true }
+  ]);
 
   useEffect(() => {
-    localStorage.setItem('rengram_novel_cards', JSON.stringify(novelCards));
-  }, [novelCards]);
+    const loadNovelCards = async () => {
+      const savedCards = await getLargeData('rengram_novel_cards');
+      if (savedCards) {
+        setNovelCards(savedCards);
+      } else {
+        const localCards = localStorage.getItem('rengram_novel_cards');
+        if (localCards) {
+          try {
+            setNovelCards(JSON.parse(localCards));
+            localStorage.removeItem('rengram_novel_cards');
+          } catch (e) {}
+        }
+      }
+    };
+    loadNovelCards();
+  }, []);
+
+  useEffect(() => {
+    if (isDataLoaded) {
+      setLargeData('rengram_novel_cards', novelCards);
+    }
+  }, [novelCards, isDataLoaded]);
 
   // Initial API Call 1: 300 NPCs
   const handleLoadHomeNPCs = async () => {
@@ -1391,7 +1445,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
                   setIsGeneratingNovel(true);
                   const promptData = novelCards.map(c => `${c.title}: ${c.content}`).join('\n');
                   const prompt = `Viết chương truyện cho tiểu thuyết dựa trên các thông tin sau:\n${promptData}`;
-                  const systemInstruction = "Bạn là một nhà văn. Viết một chương truyện dài và chi tiết.";
+                  const systemInstruction = "Bạn là một nhà văn. Viết một chương truyện dài và chi tiết. TUYỆT ĐỐI KHÔNG được để các thuật ngữ, tên riêng, hoặc từ ngữ nhấn mạnh trong dấu ngoặc đơn () hoặc dấu sao *. Hãy viết chúng như những từ ngữ bình thường trong văn bản tiểu thuyết. Ví dụ: viết 'shoji' thay vì '*shoji*' hay '(shoji)'.";
                   try {
                     const result = await callApi(prompt, systemInstruction, controller.signal);
                     setNovelResult(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
@@ -1583,6 +1637,20 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
               
               <div className="space-y-4">
                 <div>
+                  <label className="block text-sm font-bold text-stone-700 mb-1">Loại API (API Type)</label>
+                  <select 
+                    value={settings.apiType || 'auto'}
+                    onChange={e => setSettings(s => ({ ...s, apiType: e.target.value as any }))}
+                    className="w-full px-4 py-2 rounded-xl border border-pink-200 focus:border-pink-400 outline-none"
+                  >
+                    <option value="auto">Tự động phát hiện (Auto Detect)</option>
+                    <option value="openai">OpenAI-compatible</option>
+                    <option value="claude">Claude (Anthropic)</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="custom">Custom Endpoint</option>
+                  </select>
+                </div>
+                <div>
                   <label className="block text-sm font-bold text-stone-700 mb-1">Proxy Endpoint</label>
                   <input 
                     type="text" 
@@ -1599,7 +1667,7 @@ export default function RenGram({ onBack }: { onBack?: () => void }) {
                     value={settings.proxyKey}
                     onChange={e => setSettings(s => ({ ...s, proxyKey: e.target.value }))}
                     className="w-full px-4 py-2 rounded-xl border border-pink-200 focus:border-pink-400 outline-none"
-                    placeholder="sk-..."
+                    placeholder="Nhập API Key..."
                   />
                 </div>
                 <div>

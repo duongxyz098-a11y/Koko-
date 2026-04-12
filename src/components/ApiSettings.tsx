@@ -6,7 +6,10 @@ export interface ApiSettingsData {
   endpoint: string;
   apiKey: string;
   model: string;
+  apiType?: 'openai' | 'claude' | 'gemini' | 'custom' | 'auto';
 }
+
+import { getLargeData, setLargeData } from '../utils/storage';
 
 export interface CharProfile {
   id: string;
@@ -122,26 +125,48 @@ export default function ApiSettings({
   const [endpoint, setEndpoint] = useState(settings.endpoint || 'https://api.openai.com/v1');
   const [apiKey, setApiKey] = useState(settings.apiKey || '');
   const [model, setModel] = useState(settings.model || '');
+  const [apiType, setApiType] = useState(settings.apiType || 'auto');
   const [models, setModels] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   // Profile State
-  const [profiles, setProfiles] = useState<CharProfile[]>(() => {
-    const saved = localStorage.getItem('char_profiles_data_v2');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return [{
-      id: '1', name: 'Untitled', occupation: '', hobbies: '', appearance: '',
-      socials: { discord: '', x: '', instagram: '' }, about: '', history: '', avatar: ''
-    }];
-  });
-  const [selectedProfileId, setSelectedProfileId] = useState<string>(profiles[0]?.id);
+  const [profiles, setProfiles] = useState<CharProfile[]>([{
+    id: '1', name: 'Untitled', occupation: '', hobbies: '', appearance: '',
+    socials: { discord: '', x: '', instagram: '' }, about: '', history: '', avatar: ''
+  }]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('1');
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem('char_profiles_data_v2', JSON.stringify(profiles));
-  }, [profiles]);
+    const loadProfiles = async () => {
+      const savedProfiles = await getLargeData('char_profiles_data_v2');
+      if (savedProfiles && savedProfiles.length > 0) {
+        setProfiles(savedProfiles);
+        setSelectedProfileId(savedProfiles[0].id);
+      } else {
+        const localProfiles = localStorage.getItem('char_profiles_data_v2');
+        if (localProfiles) {
+          try {
+            const parsed = JSON.parse(localProfiles);
+            if (parsed && parsed.length > 0) {
+              setProfiles(parsed);
+              setSelectedProfileId(parsed[0].id);
+              localStorage.removeItem('char_profiles_data_v2');
+            }
+          } catch (e) {}
+        }
+      }
+      setIsDataLoaded(true);
+    };
+    loadProfiles();
+  }, []);
+
+  useEffect(() => {
+    if (isDataLoaded) {
+      setLargeData('char_profiles_data_v2', profiles);
+    }
+  }, [profiles, isDataLoaded]);
 
   const activeProfile = profiles.find(p => p.id === selectedProfileId) || profiles[0];
 
@@ -229,7 +254,7 @@ export default function ApiSettings({
   };
 
   const handleSave = () => {
-    setSettings({ endpoint, apiKey, model });
+    setSettings({ endpoint, apiKey, model, apiType });
     onClose();
   };
 
@@ -449,6 +474,21 @@ export default function ApiSettings({
           </div>
         ) : (
           <div className="p-6 space-y-6 animate-in fade-in max-w-2xl mx-auto">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Loại API (API Type)</label>
+              <select 
+                value={apiType}
+                onChange={e => setApiType(e.target.value as any)}
+                className="w-full p-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#F9C6D4] transition-all"
+              >
+                <option value="auto">Tự động phát hiện (Auto Detect)</option>
+                <option value="openai">OpenAI-compatible</option>
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="gemini">Gemini</option>
+                <option value="custom">Custom Endpoint</option>
+              </select>
+            </div>
+
             <div className="space-y-2 relative">
               <HandDrawnBow className="-top-4 -right-2 rotate-12" />
               <label className="text-sm font-medium text-gray-700">API Endpoint (Proxy / Official)</label>
@@ -468,7 +508,7 @@ export default function ApiSettings({
                 type="password" 
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
-                placeholder="sk-..."
+                placeholder="Nhập API Key (sk-..., yL9Fw..., v.v.)"
                 className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#F9C6D4] transition-all"
               />
             </div>

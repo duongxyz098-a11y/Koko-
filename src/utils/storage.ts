@@ -9,9 +9,21 @@ export const safeSetItem = (key: string, value: string): boolean => {
     return true;
   } catch (e) {
     if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
-      // Quota exceeded. Try to clear old chat messages to make space.
+      // Quota exceeded. Try to clear old chat messages and old kikoko/banhnho stories to make space.
       Object.keys(localStorage).forEach(k => {
-        if (k.startsWith('koko_npc_msgs_')) {
+        if (
+          k.startsWith('koko_npc_msgs_') || 
+          k.startsWith('kikoko_story_') ||
+          k.startsWith('banhnho_posts_') ||
+          k.startsWith('banhnho_promote_') ||
+          k.startsWith('banhnho_approved_') ||
+          k.startsWith('banhnho_npc_posts_') ||
+          k === 'banhnho_groups' ||
+          k === 'banhnho_form_data' ||
+          k === 'banhnho_new_post_content' ||
+          k === 'banhnho_promote_content' ||
+          k === 'kikoko_story_ids'
+        ) {
           localStorage.removeItem(k);
         }
       });
